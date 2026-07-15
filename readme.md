@@ -20,7 +20,6 @@ ETL / ELT Pipelines
         │
         ▼
 Enterprise Data Warehouse
-
         │
         ▼
 Analytics & Business Intelligence
