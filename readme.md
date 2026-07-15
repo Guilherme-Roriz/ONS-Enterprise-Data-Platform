@@ -10,19 +10,11 @@ Its primary goal is to showcase industry-standard data engineering practices, in
 
 ## Architecture
 
-Synthetic Data Sources
-        │
-        ▼
-Operational Database (OLTP)
-        │
-        ▼
-ETL / ELT Pipelines
-        │
-        ▼
-Enterprise Data Warehouse
-        │
-        ▼
-Analytics & Business Intelligence
+The platform follows a modern enterprise data architecture:
+
+> Synthetic Data Sources → Operational Database (OLTP) → ETL / ELT Pipelines → Enterprise Data Warehouse → Analytics & Business Intelligence
+
+For a detailed architecture diagram, see the documentation in `/docs`.
 
 ## Technologies
 
