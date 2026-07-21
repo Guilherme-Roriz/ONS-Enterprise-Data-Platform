@@ -1,3 +1,72 @@
+# Dimensional Modeling Document – Kimball
+
+**Project:** ONS Enterprise Data Platform
+**Layer:** Galaxy Schema (Analytics)
+**Data Source:** Data Vault (Enterprise Data Warehouse)
+**Author:** Guilherme Roriz
+**Date:** 07/21/2026
+**Version:** 1.2
+
+---
+
+## 1. Business Requirements and Scope
+
+### 1.1 Measured Business Processes
+
+| Business Process                             | Description                                                                                                     |
+|-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Power System Monitoring and Performance        | Monitors system-wide indicators such as frequency, voltage, reliability and overall grid performance.             |
+| Energy Generation                              | Monitors electricity production from power plants, including generation output, capacity and availability.       |
+| Energy Transmission                            | Monitors the transmission network, tracking power flows, installations and emergency incidents.                  |
+| Grid Occurrences                               | Records, monitors and resolves outages, equipment failures, alarms and emergency incidents.                       |
+| Maintenance Monitoring                         | Tracks preventive and corrective maintenance activities, inspections, work orders and asset availability.         |
+| Asset Management                               | Maintains information about power system assets, including power plants, substations and transmission lines.     |
+
+### 1.2 Key Analytical Questions
+
+- How much energy is each power plant generating?
+- Which plants have the highest and lowest generation?
+- What is the generation trend over time?
+- Which transmission lines carry the highest power flow?
+- Which substations are the most critical?
+- Where are transmission bottlenecks occurring?
+- What are the most frequent occurrence types?
+- What is the average outage duration?
+- How many maintenance activities are overdue?
+- Which assets have the lowest availability?
+- Is the system frequency within operational limits?
+- How stable is the electrical grid over time?
+- How many assets are in operation?
+
+### 1.3 Defined Granularities
+
+- **Power System Monitoring and Performance:** One record per measurement point per minute (point belongs to either a substation or a transmission line).
+- **Energy Generation:** One record per power plant per minute.
+- **Energy Transmission:** One record per transmission line per minute.
+- **Grid Occurrences:** One record per occurrence event. If an occurrence affects multiple assets, the event is repeated once per affected asset (each row corresponds to exactly one affected asset).
+- **Maintenance Monitoring:** One record per maintenance activity per asset.
+- **Asset Management:** One record per physical asset per day (status snapshot).
+
+---
+
+## 2. Bus Matrix
+
+| Business Process                           | DateTime | Power Plant | Substation | Transmission Line | Region | Occurrence | Maintenance |
+|---------------------------------------------|:--------:|:-----------:|:----------:|:------------------:|:------:|:----------:|:-----------:|
+| **Energy Generation**                       |    ✓     |      ✓      |            |                    |   ✓    |            |             |
+| **Energy Transmission**                     |    ✓     |             |     ✓      |         ✓          |   ✓    |            |             |
+| **Grid Occurrences**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |     ✓      |             |
+| **Maintenance Monitoring**                  |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |            |     ✓       |
+| **Power System Monitoring and Performance** |    ✓     |             |     ✓      |         ✓          |   ✓    |            |             |
+| **Asset Management**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |            |             |
+
+---
+
+## 3. Dimensional Model
+
+### 3.1 Conceptual Diagram (Galaxy Schema)
+
+The model is a galaxy (fact constellation) built around six fact tables that share a common set of conformed dimensions:
 
 Power Plant, Substation and Transmission Line act as the three "physical asset" dimensions and are shared across nearly every fact, which is what makes this a galaxy rather than a single star schema.
 
