@@ -12,7 +12,11 @@ Its primary goal is to showcase industry-standard data engineering practices, in
 
 The platform follows a modern enterprise data architecture:
 
+<<<<<<< HEAD
 > Synthetic Data Sources → Operational Database (OLTP) & Data Lake → Data Vault → Analytics & Business Intelligence
+=======
+> Synthetic Data Sources → Operational Database (OLTP) → ETL / ELT Pipelines → Enterprise Data Warehouse → Analytics & Business Intelligence
+>>>>>>> c7b13817471399e21f30c12929209d45af0ab129
 
 For a detailed architecture diagram, see the documentation in `/docs`.
 
