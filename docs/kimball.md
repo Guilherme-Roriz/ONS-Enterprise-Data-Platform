@@ -5,7 +5,7 @@
 **Data Source:** Data Vault (Enterprise Data Warehouse)
 **Author:** Guilherme Roriz
 **Date:** 07/23/2026
-**Version:** 1.3
+**Version:** 1.4
 
 ---
 
@@ -85,8 +85,8 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 - **Surrogate Key (SK):** sequential integer, generated during load.
 - **Business Key (NK):** sourced from the Data Vault (hash_key).
 - **SCD:** Slowly Changing Dimension – Type 1 (overwrite), Type 2 (new row with start/end dates), Type 3 (separate previous/current column).
-- **Vault Source:** indicates which Data Vault table the data is extracted from.
-- **Degenerate Dimension (DD):** an operational identifier (e.g., work order number) stored directly on the fact table with no corresponding dimension table.
+- **Vault Source:** indicates which Data Vault table and column the data is extracted from. Table and column names below match the Data Vault Design Document exactly, to avoid ETL ambiguity.
+- **Degenerate Dimension (DD):** an operational identifier (e.g., work order number) stored directly on the fact table with no corresponding dimension table. Degenerate dimensions use the human‑readable business key from the Hub (e.g., `ticket_number`, `order_number`), not the `hash_key_*` column, since the hash key is an internal surrogate not meant for reporting.
 - **Additive measure:** can be summed across all dimensions (e.g., energy in MWh, duration, cost).
 - **Semi-additive measure:** can be summed across some dimensions but not time (e.g., instantaneous power in MW, capacity, availability %).
 - **Non-additive measure:** cannot be summed meaningfully under any dimension (e.g., frequency in Hz, percentages requiring context) — should be averaged or recalculated.
@@ -129,14 +129,14 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 4.3 Dim_Power_Plant
 
 | Attribute              | Type     | Description                                  | SCD | Vault Source                                  |
-|------------------------|----------|-------------------------------------------------|-----|-------------------------------------------------|
+|--------------------------|----------|-----------------------------------------------|-----|-----------------------------------------------------|
 | sk_power_plant         | INT PK   | Surrogate key                                  | –   | Generated                                         |
 | hash_key_power_plant   | CHAR(32) | Business key                                   | –   | hub_power_plant.hash_key_power_plant              |
-| plant_name             | VARCHAR  | Plant name                                     | 1   | sat_power_plant_attributes.name                   |
-| plant_type             | VARCHAR  | Hydro / Thermal / Wind / Solar / Nuclear         | 1   | sat_power_plant_attributes.type                    |
-| installed_capacity_mw  | DECIMAL  | Nameplate capacity                             | 2   | sat_power_plant_attributes.installed_capacity      |
+| plant_name             | VARCHAR  | Plant name                                     | 1   | sat_power_plant_attributes.plant_name              |
+| plant_type             | VARCHAR  | Hydro / Thermal / Wind / Solar / Nuclear         | 1   | sat_power_plant_attributes.plant_type               |
+| installed_capacity_mw  | DECIMAL  | Nameplate capacity                             | 2   | sat_power_plant_attributes.installed_capacity_mw   |
 | commissioning_date     | DATE     | Date plant entered operation                   | –   | sat_power_plant_attributes.commissioning_date       |
-| operator_name          | VARCHAR  | Operating company                              | 2   | sat_power_plant_attributes.operator                 |
+| operator_name          | VARCHAR  | Operating company                              | 2   | sat_power_plant_attributes.operator_name            |
 | state_name             | VARCHAR  | State where the plant is located (denormalized)| 1   | link_power_plant_state → dim_state                  |
 | status                 | VARCHAR  | Active / Decommissioned / Under Construction   | 2   | sat_power_plant_status.status                       |
 | start_date             | DATE     | Validity start (SCD2)                          | 2   | Calculated during load                              |
@@ -146,12 +146,12 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 4.4 Dim_Substation
 
 | Attribute            | Type     | Description                          | SCD | Vault Source                             |
-|----------------------|----------|-----------------------------------------|-----|---------------------------------------------|
+|------------------------|----------|-------------------------------------------|-----|------------------------------------------------|
 | sk_substation        | INT PK   | Surrogate key                          | –   | Generated                                     |
 | hash_key_substation  | CHAR(32) | Business key                           | –   | hub_substation.hash_key_substation            |
-| substation_name      | VARCHAR  | Substation name                        | 1   | sat_substation_attributes.name                 |
-| voltage_level_kv     | DECIMAL  | Primary voltage level                  | 2   | sat_substation_attributes.voltage_level        |
-| substation_type      | VARCHAR  | Step-up / Step-down / Switching        | 1   | sat_substation_attributes.type                 |
+| substation_name      | VARCHAR  | Substation name                        | 1   | sat_substation_attributes.substation_name      |
+| voltage_level_kv     | DECIMAL  | Primary voltage level                  | 2   | sat_substation_attributes.voltage_level_kv     |
+| substation_type      | VARCHAR  | Step-up / Step-down / Switching        | 1   | sat_substation_attributes.substation_type       |
 | state_name           | VARCHAR  | State where the substation is located  | 1   | link_substation_state → dim_state              |
 | status               | VARCHAR  | Active / Decommissioned / Planned      | 2   | sat_substation_status.status                    |
 | start_date           | DATE     | Validity start (SCD2)                  | 2   | Calculated during load                          |
@@ -161,15 +161,15 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 4.5 Dim_Transmission_Line
 
 | Attribute              | Type     | Description                              | SCD | Vault Source                                 |
-|-------------------------|----------|--------------------------------------------|-----|--------------------------------------------------|
+|---------------------------|----------|----------------------------------------------|-----|------------------------------------------------------|
 | sk_transmission_line    | INT PK   | Surrogate key                            | –   | Generated                                         |
-| hash_key_line           | CHAR(32) | Business key                             | –   | hub_transmission_line.hash_key_line               |
-| line_code               | VARCHAR  | Operational line code/name               | 1   | sat_line_attributes.code                           |
-| voltage_level_kv        | DECIMAL  | Nominal voltage                          | 2   | sat_line_attributes.voltage_level                  |
+| hash_key_line           | CHAR(32) | Business key                             | –   | hub_transmission_line.hash_key_transmission_line   |
+| line_code               | VARCHAR  | Operational line code/name               | 1   | sat_line_attributes.line_code                      |
+| voltage_level_kv        | DECIMAL  | Nominal voltage                          | 2   | sat_line_attributes.voltage_level_kv               |
 | length_km               | DECIMAL  | Line length                              | 1   | sat_line_attributes.length_km                      |
 | circuit_type            | VARCHAR  | AC / DC                                  | 1   | sat_line_attributes.circuit_type                   |
-| origin_substation_name  | VARCHAR  | Origin substation (denormalized)         | 1   | link_line_substation → dim_substation               |
-| destination_substation_name | VARCHAR | Destination substation (denormalized)| 1   | link_line_substation → dim_substation               |
+| origin_substation_name  | VARCHAR  | Origin substation (denormalized)         | 1   | link_line_substation (role_code='ORIGIN') → dim_substation |
+| destination_substation_name | VARCHAR | Destination substation (denormalized)| 1   | link_line_substation (role_code='DESTINATION') → dim_substation |
 | origin_latitude         | DECIMAL(9,6) | Latitude of origin                | 1   | sat_line_attributes.origin_latitude                |
 | origin_longitude        | DECIMAL(9,6) | Longitude of origin              | 1   | sat_line_attributes.origin_longitude               |
 | destination_latitude    | DECIMAL(9,6) | Latitude of destination          | 1   | sat_line_attributes.destination_latitude           |
@@ -184,33 +184,35 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 
 ### 4.6 Dim_State
 
-*(Replaces the former Dim_Region, aligning with the `state` table in OLTP.)*
+*(Replaces the former Dim_Region, aligning with the `state` table in OLTP and `hub_state`/`sat_state_attributes` in the Data Vault.)*
 
 | Attribute          | Type     | Description                        | SCD | Vault Source                          |
-|--------------------|----------|------------------------------------|-----|----------------------------------------|
+|--------------------|----------|--------------------------------------|-----|------------------------------------------|
 | sk_state           | INT PK   | Surrogate key                      | –   | Generated                              |
 | hash_key_state     | CHAR(32) | Business key                       | –   | hub_state.hash_key_state               |
-| state_code         | VARCHAR(10)| State abbreviation (UF)           | 1   | sat_state_attributes.code              |
-| state_name         | VARCHAR(50)| Full state name                   | 1   | sat_state_attributes.name              |
+| state_code         | VARCHAR(10)| State abbreviation (UF)           | –   | hub_state.state_code (business key lives on the Hub, not on `sat_state_attributes`) |
+| state_name         | VARCHAR(50)| Full state name                   | 1   | sat_state_attributes.state_name        |
 | grid_operator_area | VARCHAR(50)| ONS operational control area      | 1   | sat_state_attributes.grid_operator_area |
 
 ### 4.7 Dim_Occurrence_Type
 
 | Attribute              | Type    | Description                             | SCD | Vault Source                            |
-|-------------------------|---------|--------------------------------------------|-----|--------------------------------------------|
+|---------------------------|---------|------------------------------------------------|-----|------------------------------------------------|
 | sk_occurrence_type      | INT PK  | Surrogate key                             | –   | Generated                                   |
-| occurrence_category     | VARCHAR | Outage / Equipment Failure / Alarm / Emergency | 1 | sat_occurrence_type.category               |
-| occurrence_subtype      | VARCHAR | Specific classification                   | 1   | sat_occurrence_type.subtype                 |
-| severity_level          | VARCHAR | Low / Medium / High / Critical            | 1   | sat_occurrence_type.severity                |
+| hash_key_occurrence_type| CHAR(32)| Business key                              | –   | hub_occurrence_type.hash_key_occurrence_type |
+| occurrence_category     | VARCHAR | Outage / Equipment Failure / Alarm / Emergency | 1 | sat_occurrence_type_attributes.category   |
+| occurrence_subtype      | VARCHAR | Specific classification                   | 1   | sat_occurrence_type_attributes.subtype     |
+| severity_level          | VARCHAR | Low / Medium / High / Critical            | 1   | sat_occurrence_type_attributes.severity_level |
 
 ### 4.8 Dim_Maintenance_Type
 
 | Attribute              | Type    | Description                          | SCD | Vault Source                          |
-|-------------------------|---------|-----------------------------------------|-----|------------------------------------------|
+|---------------------------|---------|------------------------------------------|-----|------------------------------------------|
 | sk_maintenance_type     | INT PK  | Surrogate key                         | –   | Generated                                 |
-| maintenance_category    | VARCHAR | Preventive / Corrective               | 1   | sat_maintenance_type.category             |
-| maintenance_subtype     | VARCHAR | Inspection / Work Order / Overhaul    | 1   | sat_maintenance_type.subtype               |
-| priority_level          | VARCHAR | Low / Medium / High / Urgent          | 1   | sat_maintenance_type.priority               |
+| hash_key_maintenance_type| CHAR(32)| Business key                          | –  | hub_maintenance_type.hash_key_maintenance_type |
+| maintenance_category    | VARCHAR | Preventive / Corrective               | 1   | sat_maintenance_type_attributes.category  |
+| maintenance_subtype     | VARCHAR | Inspection / Work Order / Overhaul    | 1   | sat_maintenance_type_attributes.subtype    |
+| priority_level          | VARCHAR | Low / Medium / High / Urgent          | 1   | sat_maintenance_type_attributes.priority_level |
 
 ---
 
@@ -219,13 +221,13 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 5.1 Fact_Energy_Generation
 
 | Attribute              | Type    | Description                       | Vault Source / Rule                          |
-|-------------------------|---------|--------------------------------------|-------------------------------------------------|
+|--------------------------|---------|--------------------------------------|-----------------------------------------------------|
 | sk_date                | INT FK  | Measurement date                  | dim_date.sk_date                                 |
 | sk_time_of_day         | INT FK  | Measurement minute                | dim_time_of_day.sk_time_of_day                    |
 | sk_power_plant         | INT FK  | Generating plant                  | dim_power_plant.sk_power_plant (valid version at reading date) |
 | sk_state               | INT FK  | State where the plant is located  | dim_state.sk_state (via dim_power_plant)          |
-| generation_output_mw   | DECIMAL | Active power generated (instantaneous) | sat_generation_reading.output_mw            |
-| available_capacity_mw  | DECIMAL | Capacity available at that minute | sat_generation_reading.available_capacity           |
+| generation_output_mw   | DECIMAL | Active power generated (instantaneous) | sat_gen_reading.output_mw            |
+| available_capacity_mw  | DECIMAL | Capacity available at that minute | sat_gen_reading.available_capacity           |
 | capacity_factor_pct    | DECIMAL | output / installed_capacity (from the plant version valid at reading date) | Calculated |
 
 **Granularity:** One row per power plant per minute.
@@ -237,14 +239,14 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 5.2 Fact_Energy_Transmission
 
 | Attribute              | Type    | Description                        | Vault Source / Rule                       |
-|-------------------------|---------|----------------------------------------|-----------------------------------------------|
+|--------------------------|---------|------------------------------------------|--------------------------------------------------|
 | sk_date                | INT FK  | Measurement date                    | dim_date.sk_date                                |
 | sk_time_of_day         | INT FK  | Measurement minute                  | dim_time_of_day.sk_time_of_day                   |
 | sk_transmission_line   | INT FK  | Transmission line                   | dim_transmission_line.sk_transmission_line (valid version at reading date) |
 | sk_state               | INT FK  | State (derived from line location – e.g., using the state of the origin substation or a predefined dominant state) | dim_state.sk_state (via ETL logic) |
-| power_flow_mw          | DECIMAL | Active power flow (instantaneous)   | sat_transmission_reading.power_flow_mw             |
+| power_flow_mw          | DECIMAL | Active power flow (instantaneous)   | sat_line_measurement.power_flow_mw             |
 | line_loading_pct       | DECIMAL | flow / thermal_limit                | Calculated (using line characteristics valid at reading date) |
-| losses_mw              | DECIMAL | Transmission losses (instantaneous) | sat_transmission_reading.losses_mw                  |
+| losses_mw              | DECIMAL | Transmission losses (instantaneous) | sat_line_measurement.losses_mw                  |
 
 **Granularity:** One row per transmission line per minute.
 **Measure classification:**
@@ -256,16 +258,16 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 5.3 Fact_Power_System_Monitoring
 
 | Attribute              | Type    | Description                        | Vault Source / Rule                       |
-|-------------------------|---------|----------------------------------------|-----------------------------------------------|
+|--------------------------|---------|------------------------------------------|--------------------------------------------------|
 | sk_date                | INT FK  | Measurement date                    | dim_date.sk_date                                |
 | sk_time_of_day         | INT FK  | Measurement minute                  | dim_time_of_day.sk_time_of_day                   |
 | sk_substation          | INT FK  | Monitoring point (substation) – used when measurement point is a substation | dim_substation.sk_substation (nullable)          |
 | sk_transmission_line   | INT FK  | Monitoring point (line) – used when measurement point is on a line | dim_transmission_line.sk_transmission_line (nullable) |
 | sk_state               | INT FK  | State of the monitoring point       | dim_state.sk_state (derived from the asset: for substation via dim_substation, for line via ETL rule) |
-| frequency_hz           | DECIMAL | System frequency (non-additive)     | sat_system_measurement.frequency                   |
-| voltage_kv             | DECIMAL | Measured voltage (non-additive)     | sat_system_measurement.voltage                     |
-| reliability_index      | DECIMAL | Composite reliability score (non-additive) | sat_system_measurement.reliability_index   |
-| system_load_mw         | DECIMAL | Instantaneous system load (semi-additive) | sat_system_measurement.load_mw            |
+| frequency_hz           | DECIMAL | System frequency (non-additive)     | sat_substation_measurement.frequency_hz / sat_line_measurement.frequency_hz (per row's asset type) |
+| voltage_kv             | DECIMAL | Measured voltage (non-additive)     | sat_substation_measurement.voltage_kv / sat_line_measurement.voltage_kv (per row's asset type) |
+| reliability_index      | DECIMAL | Composite reliability score (non-additive) | sat_substation_measurement.reliability_index (substations only; NULL for lines) |
+| system_load_mw         | DECIMAL | Instantaneous system load (semi-additive) | sat_substation_measurement.system_load_mw (substations only; NULL for lines) |
 
 **Granularity:** One row per measurement point per minute.  
 **Constraint:** Exactly one of `sk_substation` or `sk_transmission_line` must be non-null; the other must be null.
@@ -277,8 +279,8 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 5.4 Fact_Grid_Occurrence
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|-------------------------|---------|------------------------------------------|--------------------------------------------------|
-| occurrence_id          | VARCHAR | Degenerate dimension – event/ticket ID | hub_occurrence.hash_key_occurrence (business ID)  |
+|--------------------------|---------|----------------------------------------|-----------------------------------------------------|
+| occurrence_id          | VARCHAR | Degenerate dimension – event/ticket ID | hub_occurrence.ticket_number (human-readable business key; not the hash_key) |
 | sk_date                | INT FK  | Event start date                       | dim_date.sk_date                                    |
 | sk_time_of_day         | INT FK  | Event start time                       | dim_time_of_day.sk_time_of_day                       |
 | sk_power_plant         | INT FK  | Affected plant (nullable)              | link_occurrence_asset → dim_power_plant (valid version at event date) |
@@ -299,19 +301,19 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 ### 5.5 Fact_Maintenance
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|-------------------------|---------|------------------------------------------|--------------------------------------------------|
-| work_order_number      | VARCHAR | Degenerate dimension – work order ID    | hub_work_order.hash_key_work_order (business ID)   |
+|--------------------------|---------|----------------------------------------|-----------------------------------------------------|
+| work_order_number      | VARCHAR | Degenerate dimension – work order ID    | hub_work_order.order_number (human-readable business key; not the hash_key) |
 | sk_date                | INT FK  | Scheduled/executed date                | dim_date.sk_date                                    |
-| sk_power_plant         | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_power_plant (valid version at date) |
-| sk_substation          | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_substation               |
-| sk_transmission_line   | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_transmission_line         |
+| sk_power_plant         | INT FK  | Asset under maintenance (nullable)     | link_work_order_asset → dim_power_plant (valid version at date) |
+| sk_substation          | INT FK  | Asset under maintenance (nullable)     | link_work_order_asset → dim_substation               |
+| sk_transmission_line   | INT FK  | Asset under maintenance (nullable)     | link_work_order_asset → dim_transmission_line         |
 | sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)           |
 | sk_maintenance_type    | INT FK  | Category/subtype/priority              | dim_maintenance_type.sk_maintenance_type                |
-| planned_duration_hours | DECIMAL | Planned work duration                  | sat_maintenance_detail.planned_duration_hours            |
-| actual_duration_hours  | DECIMAL | Actual work duration                   | sat_maintenance_detail.actual_duration_hours              |
-| cost                   | DECIMAL | Maintenance cost                       | sat_maintenance_detail.cost                              |
-| overdue_flag           | BOOLEAN | Activity past scheduled date           | sat_maintenance_detail.overdue_flag                       |
-| asset_availability_pct | DECIMAL | Asset availability during the period   | sat_maintenance_detail.availability_pct                    |
+| planned_duration_hours | DECIMAL | Planned work duration                  | sat_work_order_detail.planned_duration_hours            |
+| actual_duration_hours  | DECIMAL | Actual work duration                   | sat_work_order_detail.actual_duration_hours              |
+| cost                   | DECIMAL | Maintenance cost                       | sat_work_order_detail.cost                              |
+| overdue_flag           | BOOLEAN | Activity past scheduled date           | sat_work_order_detail.overdue_flag                       |
+| asset_availability_pct | DECIMAL | Asset availability during the period   | sat_work_order_detail.asset_availability_pct                |
 
 **Granularity:** One row per maintenance activity per asset. If a single work order covers multiple assets, it generates multiple rows (one per asset).  
 **Measure classification:**
@@ -324,15 +326,15 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 *Periodic snapshot fact that complements the master data in the asset dimensions.*
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|-------------------------|---------|------------------------------------------|--------------------------------------------------|
+|--------------------------|---------|----------------------------------------|-----------------------------------------------------|
 | sk_date                | INT FK  | Snapshot date                          | dim_date.sk_date                                    |
 | sk_power_plant         | INT FK  | Asset (nullable)                       | dim_power_plant.sk_power_plant (valid version at snapshot date) |
 | sk_substation          | INT FK  | Asset (nullable)                       | dim_substation.sk_substation (valid version)        |
 | sk_transmission_line   | INT FK  | Asset (nullable)                       | dim_transmission_line.sk_transmission_line (valid version) |
 | sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)          |
-| availability_pct       | DECIMAL | % of the day the asset was available   | sat_asset_status.availability_pct                        |
-| in_operation_flag      | BOOLEAN | Whether the asset was in service       | sat_asset_status.in_operation_flag                        |
-| asset_age_years        | DECIMAL | Age since commissioning                | Calculated (snapshot_date − commissioning_date from the valid dimension row) |
+| availability_pct       | DECIMAL | % of the day the asset was available   | sat_power_plant_daily_snapshot.availability_pct / sat_substation_daily_snapshot.availability_pct / sat_line_daily_snapshot.availability_pct (per row's asset type) |
+| in_operation_flag      | BOOLEAN | Whether the asset was in service       | sat_power_plant_daily_snapshot.in_operation_flag / sat_substation_daily_snapshot.in_operation_flag / sat_line_daily_snapshot.in_operation_flag (per row's asset type) |
+| asset_age_years        | DECIMAL | Age since commissioning                | Calculated (snapshot_date − commissioning_date from the valid dimension row); also available pre-calculated on the source snapshot satellites |
 
 **Granularity:** One row per physical asset per day. Exactly one of the asset FKs is non-null.  
 **Measure classification:**
@@ -372,3 +374,4 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | 1.1     | 07/21/2026 | Refined measure classification, corrected fact granularity notes                                                             | Guilherme Roriz  |
 | 1.2     | 07/21/2026 | Corrected SCD2 join logic in ETL, clarified measure additivity, added glossary, partitioning section                         | Guilherme Roriz  |
 | 1.3     | 07/23/2026 | Replaced Dim_Region with Dim_State, updated all dimensions and facts accordingly, added geographic coordinates to transmission line dimension | Guilherme Roriz  |
+| 1.4     | 07/23/2026 | Review pass, aligned all "Vault Source" references with actual Data Vault table/column names: `sat_gen_reading` (not `sat_generation_reading`), `sat_line_measurement`/`sat_substation_measurement` (not `sat_transmission_reading`/`sat_system_measurement`), `link_work_order_asset`/`sat_work_order_detail` (not `link_maintenance_asset`/`sat_maintenance_detail`), split per-asset-type snapshot satellites for Fact_Asset_Status (not a single `sat_asset_status`); corrected satellite column names (`plant_name`, `installed_capacity_mw`, `operator_name`, `substation_name`, `voltage_level_kv`, `substation_type`, `line_code`, `severity_level`, `priority_level`); added missing `hash_key_occurrence_type` and `hash_key_maintenance_type` business-key attributes to Dim_Occurrence_Type/Dim_Maintenance_Type for consistency with the other conformed dimensions; fixed `Dim_State.state_code` source to `hub_state.state_code` (business key lives on the Hub, not on `sat_state_attributes`); changed degenerate dimensions `occurrence_id` and `work_order_number` to source from the human-readable `ticket_number`/`order_number` Hub attributes instead of the internal `hash_key_*` columns | Guilherme Roriz  |

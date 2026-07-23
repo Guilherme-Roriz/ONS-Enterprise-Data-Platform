@@ -3,7 +3,7 @@
 **Project:** ONS Enterprise Data Platform  
 **Author:** Guilherme Roriz  
 **Date:** 23/07/2026  
-**Version:** 1.0
+**Version:** 1.1
  
 ---
  
@@ -31,10 +31,10 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
  
 ### 2.2 Transmission & System Monitoring Domain
 | Table Name         | Description                                                                 | Estimated Volume (rows/day)            | Primary Key    | Key Columns                     | Principal Measurements (per row)                          |
-|--------------------|-----------------------------------------------------------------------------|----------------------------------------|----------------|---------------------------------|-----------------------------------------------------------|
+|--------------------|-------------------------------------------------------------------------------|----------------------------------------|----------------|---------------------------------|-----------------------------------------------------------|
 | transmission_line  | Transmission line master data                                               | ~500 (static)                          | line_id        | line_id, line_code              | (master data only)                                        |
 | substation         | Substation master data                                                      | ~200 (static)                          | substation_id  | substation_id, substation_code  | (master data only)                                        |
-| measurement        | Minute‑level electric measurements at substations and transmission lines    | ~1 440 000 (1000 points × 1440)       | measurement_id | asset_type, asset_id, reading_timestamp | power_flow_mw, losses_mw, frequency_hz, voltage_kv, system_load_mw, reliability_index |
+| measurement        | Minute‑level electric measurements at substations and transmission lines    | ~1 440 000 (1000 points × 1440)       | measurement_id | asset_type, asset_id, reading_timestamp | power_flow_mw, losses_mw, frequency_hz, voltage_kv, system_load_mw, reliability_index |
  
 **Notes on `measurement`:**
 - Each row belongs to exactly one asset, identified by `asset_type` (`'substation'` or `'transmission_line'`) and `asset_id`.
@@ -50,14 +50,14 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
  
 ### 2.4 Maintenance Domain
 | Table Name          | Description                                          | Estimated Volume (rows/day) | Primary Key       | Key Columns                     |
-|---------------------|------------------------------------------------------|-----------------------------|-------------------|---------------------------------|
+|----------------------|--------------------------------------------------------|-----------------------------|-------------------|---------------------------------|
 | work_order          | Preventive and corrective maintenance activities     | ~50 work orders/day         | work_order_id     | work_order_id, order_number    |
 | work_order_asset    | Links a work order to affected assets                | ~60 (avg 1.2 assets/order)  | (work_order_id, asset_type, asset_id) | work_order_id, asset_type, asset_id |
 | maintenance_type    | Reference table for maintenance classification       | ~20 (static)                | maintenance_type_id| type_code                       |
  
 ### 2.5 Asset Management Domain
 | Table Name         | Description                                                  | Estimated Volume (rows/day) | Primary Key       | Key Columns                            |
-|--------------------|--------------------------------------------------------------|-----------------------------|-------------------|----------------------------------------|
+|--------------------|-------------------------------------------------------------------|-----------------------------|-------------------|------------------------------------------|
 | asset_status       | Daily snapshot of operational status and availability per asset | ~800 (100 plants + 200 substations + 500 lines) | (snapshot_date, asset_type, asset_id) | snapshot_date, asset_type, asset_id   |
  
 ### 2.6 Common Reference Domain
@@ -95,7 +95,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.2 Table: generation_reading
  
 | Column Name        | Data Type     | Description                                   | Business Rules                       |
-|--------------------|---------------|-----------------------------------------------|--------------------------------------|
+|--------------------|---------------|-------------------------------------------------|--------------------------------------|
 | reading_id         | BIGINT (PK)   | Surrogate key                                | Auto-increment                       |
 | plant_id           | INT (FK)      | References plant(plant_id)                   | NOT NULL                             |
 | reading_timestamp  | TIMESTAMP     | Measurement date/time (UTC)                  | NOT NULL, per-minute                 |
@@ -111,7 +111,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.3 Table: transmission_line
  
 | Column Name            | Data Type     | Description                               | Business Rules                       |
-|------------------------|---------------|-------------------------------------------|--------------------------------------|
+|-------------------------|---------------|-----------------------------------------------|--------------------------------------|
 | line_id                | INT (PK)      | Internal surrogate ID                    | Auto-increment                       |
 | line_code              | VARCHAR(20)   | Business natural key                     | Unique, stable, used as Vault hub key|
 | line_name              | VARCHAR(100)  | Operational name                         | NOT NULL                             |
@@ -131,15 +131,15 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
  
 **Notes for Data Vault:**
 - `line_code` → `hub_transmission_line` business key.
-- `line_name`, `voltage_level_kv`, `length_km`, `circuit_type`, `origin_substation_id`, `destination_substation_id` are attributes in `sat_line_attributes` (SCD2 for `voltage_level_kv`, `status`).
-- `status` is also stored in a separate satellite `sat_line_status` for independent history tracking.
+- `line_name`, `voltage_level_kv`, `length_km`, `circuit_type`, `origin_substation_id`, `destination_substation_id` are attributes in `sat_line_attributes` (SCD2 for `voltage_level_kv`).
+- `status` is tracked exclusively in a separate satellite `sat_line_status` (SCD2), not duplicated in `sat_line_attributes`.
  
 ---
  
 ### 3.4 Table: substation
  
 | Column Name        | Data Type     | Description                              | Business Rules                       |
-|--------------------|---------------|------------------------------------------|--------------------------------------|
+|--------------------|---------------|----------------------------------------------|--------------------------------------|
 | substation_id      | INT (PK)      | Internal surrogate ID                   | Auto-increment                       |
 | substation_code    | VARCHAR(20)   | Business natural key                    | Unique, stable                       |
 | substation_name    | VARCHAR(100)  | Substation name                         | NOT NULL                             |
@@ -147,7 +147,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | substation_type    | VARCHAR(30)   | Step-up / Step-down / Switching         | CHECK (substation_type IN list)      |
 | status             | VARCHAR(20)   | Active / Decommissioned / Planned       | CHECK (status IN list)               |
 | last_updated       | TIMESTAMP     | Record update timestamp                 | DEFAULT NOW()                        |
-| stado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
+| estado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
  
 **Notes for Data Vault:**
 - `substation_code` → `hub_substation` business key.
@@ -181,7 +181,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
  
 **Notes for Data Vault:**
 - This table feeds a raw satellite `sat_measurement` in the Data Vault. The satellite stores `reading_timestamp`, `asset_type` (as part of context), and all measured values.
-- The hash key for the parent entity depends on `asset_type`: it combines with `hub_substation` or `hub_transmission_line` accordingly. A link table or multi‑hub reference may be needed, but a simpler approach is to create two separate satellites: `sat_substation_measurement` and `sat_line_measurement`, each linked to the respective hub. Alternatively, a single satellite with a compound business key (asset_type + asset_id) can be used.
+- The hash key for the parent entity depends on `asset_type`: it combines with `hub_substation` or `hub_transmission_line` accordingly. The Data Vault design (Section 5.9) implements this as two separate satellites: `sat_substation_measurement` and `sat_line_measurement`, each linked to the respective hub.
 - Galaxy fact tables (`Fact_Energy_Transmission`, `Fact_Power_System_Monitoring`) will consume from these satellites by filtering on `asset_type`.
  
 ---
@@ -189,7 +189,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.6 Table: occurrence
  
 | Column Name         | Data Type     | Description                                    | Business Rules / Constraints           |
-|---------------------|---------------|------------------------------------------------|----------------------------------------|
+|---------------------|---------------|--------------------------------------------------|----------------------------------------|
 | occurrence_id       | INT (PK)      | Internal surrogate key                         | Auto-increment                         |
 | ticket_number       | VARCHAR(20)   | Business natural key (work order / event ID)   | UNIQUE, NOT NULL                       |
 | start_datetime      | TIMESTAMP     | Event start date/time (UTC)                    | NOT NULL                               |
@@ -209,7 +209,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.7 Table: occurrence_asset
  
 | Column Name       | Data Type     | Description                                           | Business Rules                |
-|-------------------|---------------|-------------------------------------------------------|-------------------------------|
+|-------------------|---------------|-----------------------------------------------------------|-------------------------------|
 | occurrence_id     | INT (FK)      | References occurrence(occurrence_id)                  | NOT NULL                      |
 | asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'            | NOT NULL, CHECK (list)        |
 | asset_id          | INT           | FK to the respective asset table (plant_id, etc.)     | NOT NULL                      |
@@ -223,13 +223,13 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.8 Table: occurrence_type
  
 | Column Name        | Data Type     | Description                           | Business Rules                |
-|--------------------|---------------|---------------------------------------|-------------------------------|
+|--------------------|---------------|--------------------------------------------|-------------------------------|
 | occurrence_type_id | INT (PK)      | Surrogate key                         | Auto-increment                |
 | type_code          | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
 | category           | VARCHAR(30)   | Outage / Equipment Failure / Alarm / Emergency | CHECK (list)         |
 | subtype            | VARCHAR(50)   | Detailed classification               |                               |
 | severity_level     | VARCHAR(10)   | Low / Medium / High / Critical        | CHECK (list)                  |
-| date               | DATE          |                                       |                               |
+| date               | DATE          | **Unmapped in the current Data Vault design** — business meaning (e.g., date the classification record was created/became effective) needs to be confirmed before this column is dropped or mapped. Tentatively carried into `sat_occurrence_type_attributes.effective_date`. |                               |
  
 **Notes for Data Vault:**
 - Becomes a reference table in the Data Vault (or a small `dim_occurrence_type` directly in the Galaxy). Since it's static, it can be loaded as a reference table or as a satellite of a reference hub.
@@ -239,7 +239,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.9 Table: work_order
  
 | Column Name           | Data Type     | Description                                    | Business Rules                |
-|-----------------------|---------------|------------------------------------------------|-------------------------------|
+|-----------------------|---------------|----------------------------------------------------|-------------------------------|
 | work_order_id         | INT (PK)      | Internal surrogate key                         | Auto-increment                |
 | order_number          | VARCHAR(20)   | Business natural key (work order number)       | UNIQUE, NOT NULL              |
 | scheduled_date        | DATE          | Planned execution date                         |                               |
@@ -260,7 +260,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.10 Table: work_order_asset
  
 | Column Name       | Data Type     | Description                                      | Business Rules               |
-|-------------------|---------------|--------------------------------------------------|------------------------------|
+|-------------------|---------------|-----------------------------------------------------|------------------------------|
 | work_order_id     | INT (FK)      | References work_order(work_order_id)             | NOT NULL                     |
 | asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
 | asset_id          | INT           | FK to the respective asset table                 | NOT NULL                     |
@@ -273,7 +273,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.11 Table: maintenance_type
  
 | Column Name          | Data Type     | Description                           | Business Rules                |
-|----------------------|---------------|---------------------------------------|-------------------------------|
+|----------------------|---------------|--------------------------------------------|-------------------------------|
 | maintenance_type_id  | INT (PK)      | Surrogate key                         | Auto-increment                |
 | type_code            | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
 | category             | VARCHAR(20)   | Preventive / Corrective               | CHECK (list)                  |
@@ -288,7 +288,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 3.12 Table: asset_status
  
 | Column Name         | Data Type     | Description                                      | Business Rules               |
-|---------------------|---------------|--------------------------------------------------|------------------------------|
+|---------------------|---------------|-----------------------------------------------------|------------------------------|
 | snapshot_date       | DATE          | Snapshot date                                    | NOT NULL                     |
 | asset_type          | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
 | asset_id            | INT           | FK to the respective asset table                 | NOT NULL                     |
@@ -296,22 +296,22 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | in_operation_flag   | BOOLEAN       | Whether the asset was in service that day        | DEFAULT TRUE                 |
  
 **Notes for Data Vault:**
-- This is a periodic snapshot. It can be loaded directly into the Galaxy fact table `Fact_Asset_Status`, or first stored as a satellite in the Data Vault (`sat_asset_status`) linked to the asset hub. For simplicity in an academic project, you might skip the Vault satellite and populate the fact table directly from this OLTP table (if the data is already clean and daily). However, to maintain architectural purity, you could create a satellite that simply stores the daily state and then the Galaxy reads from it.
+- This is a periodic snapshot. The Data Vault design (Section 5) splits it by `asset_type` into three dedicated satellites — `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, and `sat_line_daily_snapshot` — each linked to the corresponding asset hub, rather than a single generic `sat_asset_status`. The Galaxy fact table `Fact_Asset_Status` reads from all three.
  
 ---
  
 ### 3.13 Table: state
  
 | Column Name        | Data Type     | Description                              | Business Rules                |
-|--------------------|---------------|------------------------------------------|-------------------------------|
+|--------------------|---------------|----------------------------------------------|-------------------------------|
 | state_id           | INT (PK)      | Internal surrogate key                   | Auto-increment                |
 | state_code         | VARCHAR(10)   | Business natural key                     | UNIQUE, NOT NULL              |
 | state_name         | VARCHAR(50)   | Region/subsystem name                    | NOT NULL                      |
 | grid_operator_area | VARCHAR(50)   | ONS operational control area             |                               |
  
 **Notes for Data Vault:**
-- `state_id` → `hub_region` business key.
-- Attributes stored in `sat_region_attributes` (static, SCD1).
+- `state_code` → `hub_state` business key.
+- Attributes stored in `sat_state_attributes` (static, SCD1).
  
 ---
  
@@ -324,7 +324,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 - **occurrence.ticket_number** – unique; universally identifies an event.
 - **work_order.order_number** – unique; identifies a work order.
 - **occurrence_type.type_code** and **maintenance_type.type_code** – unique within their respective domain tables.
-- **region.region_code** – unique.
+- **state.state_code** – unique.
  
 ### 4.2 Referential Integrity
 - `generation_reading.plant_id` → `plant.plant_id`
@@ -334,6 +334,8 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 - `transmission_line.destination_substation_id` → `substation.substation_id`
 - `occurrence_asset.occurrence_id` → `occurrence.occurrence_id`; `asset_id` points to the relevant asset table according to `asset_type`
 - `work_order_asset.work_order_id` → `work_order.work_order_id`; `asset_id` points to the relevant asset table according to `asset_type`
+- `plant.estado_id` → `state.state_id`
+- `substation.estado_id` → `state.state_id`
  
 ### 4.3 Handling of Missing and Invalid Data
 - **Generation and measurement readings**: records are expected every minute. Communication failures may cause missing minutes. The ETL process loads only the existing records; it does not fill gaps. The analytics layer may choose to interpolate or ignore missing data.
@@ -346,8 +348,10 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 - **However**, the Data Vault is designed to capture and preserve all historical changes: during each ETL load, the current OLTP values are compared with the latest satellite records. When a change is detected, the old satellite row is closed (by setting `end_date`) and a new row is inserted, thus building a full history that the source system lacks.
 - This SCD Type 2 mechanism ensures that the Galaxy dimensions (e.g., `Dim_Power_Plant`) can answer both "current state" and "as-of historical state" queries.
 - For event tables (`occurrence`, `work_order`), which may be updated (e.g., closing an occurrence), the Data Vault either overwrites the corresponding satellite attributes (SCD Type 1) or keeps additional satellites for audit, depending on the project's requirements.
-- **In summary:** the OLTP provides the current snapshot; the Data Vault creates and stores the complete change history needed for analytics.### 4.5 Data Volume and Growth
-- **Master data tables**: `plant` (~100 records), `substation` (~200), `transmission_line` (~500), `region` (~15) – very slow growth.
+- **In summary:** the OLTP provides the current snapshot; the Data Vault creates and stores the complete change history needed for analytics.
+
+### 4.5 Data Volume and Growth
+- **Master data tables**: `plant` (~100 records), `substation` (~200), `transmission_line` (~500), `state` (~27) – very slow growth.
 - **Reading tables**: `generation_reading` (~144k rows/day), `measurement` (~1.44M rows/day) – linear growth with the number of monitoring points × minutes.
 - **Event tables**: `occurrence` (~100 events/day), `work_order` (~50 orders/day) – low daily volume, but cumulative.
 - **Relationship tables**: `occurrence_asset` (~120 rows/day), `work_order_asset` (~60 rows/day).
@@ -369,11 +373,21 @@ transmission_line (M) ── references ── (1) substation (destination)
  
 occurrence_type (independent reference table)
 maintenance_type (independent reference table)
-region (independent reference table, no direct FK from assets; relationships modeled in Data Vault)
+state (independent reference table, no direct FK from assets in the OLTP; relationships modeled in the Data Vault via link tables)
  
  
 **Notes:**
 - The tables `measurement`, `occurrence_asset`, `work_order_asset` and `asset_status` use the pair `asset_type` + `asset_id` to dynamically reference any asset type, avoiding multiple physical foreign keys.
-- The `region` table has no foreign key from the asset tables in the OLTP; the association between assets and regions is modeled in the Data Vault via link tables (e.g., `link_power_plant_region`), allowing an asset to belong to more than one region or region assignments to change over time.
+- Although `plant.estado_id` and `substation.estado_id` are physical FKs in the OLTP, the Data Vault still models the plant/substation‑to‑state relationship via link tables (`link_power_plant_state`, `link_substation_state`), allowing an asset's state assignment to change over time and preserving full history — which a simple FK overwrite in the OLTP cannot do.
 - The diagram above shows the primary logical dependencies, sufficient for guiding extraction and modeling in the Data Vault.
+
 asset_status (independent snapshot table, references assets by asset_type + asset_id)
+
+---
+
+## 6. Revision History
+
+| Version | Date       | Changes                                                                                                                                                                                                 | Author           |
+|---------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
+| 1.0     | 23/07/2026 | Initial OLTP source documentation                                                                                                                                                                     | Guilherme Roriz  |
+| 1.1     | 23/07/2026 | Review pass: renamed remaining `region`/`region_code`/`link_power_plant_region` references to `state`/`state_code`/`link_power_plant_state` (Section 5); fixed `state` volume figure in Section 4.5 (was incorrectly listed as `region (~15)`, corrected to `state (~27)`); fixed `substation.stado_id` typo to `estado_id` (Section 3.4) to match `plant.estado_id`; removed contradictory statement that `sat_line_attributes` carries SCD2 `status` (Section 3.3) since the Data Vault design tracks `status` only in `sat_line_status`; flagged unmapped `occurrence_type.date` column (Section 3.8); added FK notes for `estado_id` (Section 4.2) | Guilherme Roriz  |
