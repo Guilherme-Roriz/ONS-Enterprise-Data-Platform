@@ -147,7 +147,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | substation_type    | VARCHAR(30)   | Step-up / Step-down / Switching         | CHECK (substation_type IN list)      |
 | status             | VARCHAR(20)   | Active / Decommissioned / Planned       | CHECK (status IN list)               |
 | last_updated       | TIMESTAMP     | Record update timestamp                 | DEFAULT NOW()                        |
-| estado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
+| stado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
  
 **Notes for Data Vault:**
 - `substation_code` → `hub_substation` business key.
