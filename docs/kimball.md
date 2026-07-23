@@ -4,8 +4,8 @@
 **Layer:** Galaxy Schema (Analytics)
 **Data Source:** Data Vault (Enterprise Data Warehouse)
 **Author:** Guilherme Roriz
-**Date:** 07/21/2026
-**Version:** 1.2
+**Date:** 07/23/2026
+**Version:** 1.3
 
 ---
 
@@ -51,14 +51,14 @@
 
 ## 2. Bus Matrix
 
-| Business Process                           | DateTime | Power Plant | Substation | Transmission Line | Region | Occurrence | Maintenance |
-|---------------------------------------------|:--------:|:-----------:|:----------:|:------------------:|:------:|:----------:|:-----------:|
-| **Energy Generation**                       |    ✓     |      ✓      |            |                    |   ✓    |            |             |
-| **Energy Transmission**                     |    ✓     |             |     ✓      |         ✓          |   ✓    |            |             |
-| **Grid Occurrences**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |     ✓      |             |
-| **Maintenance Monitoring**                  |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |            |     ✓       |
-| **Power System Monitoring and Performance** |    ✓     |             |     ✓      |         ✓          |   ✓    |            |             |
-| **Asset Management**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓    |            |             |
+| Business Process                           | DateTime | Power Plant | Substation | Transmission Line | State | Occurrence | Maintenance |
+|---------------------------------------------|:--------:|:-----------:|:----------:|:------------------:|:-----:|:----------:|:-----------:|
+| **Energy Generation**                       |    ✓     |      ✓      |            |                    |   ✓   |            |             |
+| **Energy Transmission**                     |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |
+| **Grid Occurrences**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |     ✓      |             |
+| **Maintenance Monitoring**                  |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |     ✓       |
+| **Power System Monitoring and Performance** |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |
+| **Asset Management**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |             |
 
 ---
 
@@ -67,6 +67,16 @@
 ### 3.1 Conceptual Diagram (Galaxy Schema)
 
 The model is a galaxy (fact constellation) built around six fact tables that share a common set of conformed dimensions:
+Dim_Date ─┐
+Dim_Time_of_Day ─┤
+Dim_Power_Plant ─┤ ┌── Fact_Energy_Generation
+Dim_Substation ──┼──────────┼── Fact_Energy_Transmission
+Dim_Transmission_Line ─┤ ├── Fact_Power_System_Monitoring
+Dim_State ────────┤ ├── Fact_Grid_Occurrence
+Dim_Occurrence_Type ─┤ ├── Fact_Maintenance
+Dim_Maintenance_Type ┘ └── Fact_Asset_Status
+
+text
 
 Power Plant, Substation and Transmission Line act as the three "physical asset" dimensions and are shared across nearly every fact, which is what makes this a galaxy rather than a single star schema.
 
@@ -127,10 +137,11 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | installed_capacity_mw  | DECIMAL  | Nameplate capacity                             | 2   | sat_power_plant_attributes.installed_capacity      |
 | commissioning_date     | DATE     | Date plant entered operation                   | –   | sat_power_plant_attributes.commissioning_date       |
 | operator_name          | VARCHAR  | Operating company                              | 2   | sat_power_plant_attributes.operator                 |
-| region_name            | VARCHAR  | Region the plant belongs to (denormalized)     | 1   | link_power_plant_region → dim_region                |
+| state_name             | VARCHAR  | State where the plant is located (denormalized)| 1   | link_power_plant_state → dim_state                  |
 | status                 | VARCHAR  | Active / Decommissioned / Under Construction   | 2   | sat_power_plant_status.status                       |
 | start_date             | DATE     | Validity start (SCD2)                          | 2   | Calculated during load                              |
 | end_date               | DATE     | Validity end (SCD2)                            | 2   | Calculated during load                              |
+| sk_state               | INT FK   | Surrogate key for state                        | –   | dim_state.sk_state (via link_power_plant_state)     |
 
 ### 4.4 Dim_Substation
 
@@ -141,10 +152,11 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | substation_name      | VARCHAR  | Substation name                        | 1   | sat_substation_attributes.name                 |
 | voltage_level_kv     | DECIMAL  | Primary voltage level                  | 2   | sat_substation_attributes.voltage_level        |
 | substation_type      | VARCHAR  | Step-up / Step-down / Switching        | 1   | sat_substation_attributes.type                 |
-| region_name          | VARCHAR  | Region (denormalized)                  | 1   | link_substation_region → dim_region            |
+| state_name           | VARCHAR  | State where the substation is located  | 1   | link_substation_state → dim_state              |
 | status               | VARCHAR  | Active / Decommissioned / Planned      | 2   | sat_substation_status.status                    |
 | start_date           | DATE     | Validity start (SCD2)                  | 2   | Calculated during load                          |
 | end_date             | DATE     | Validity end (SCD2)                    | 2   | Calculated during load                          |
+| sk_state             | INT FK   | Surrogate key for state                | –   | dim_state.sk_state (via link_substation_state)   |
 
 ### 4.5 Dim_Transmission_Line
 
@@ -158,20 +170,29 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | circuit_type            | VARCHAR  | AC / DC                                  | 1   | sat_line_attributes.circuit_type                   |
 | origin_substation_name  | VARCHAR  | Origin substation (denormalized)         | 1   | link_line_substation → dim_substation               |
 | destination_substation_name | VARCHAR | Destination substation (denormalized)| 1   | link_line_substation → dim_substation               |
-| region_name             | VARCHAR  | Region (denormalized)                    | 1   | link_line_region → dim_region                       |
+| origin_latitude         | DECIMAL(9,6) | Latitude of origin                | 1   | sat_line_attributes.origin_latitude                |
+| origin_longitude        | DECIMAL(9,6) | Longitude of origin              | 1   | sat_line_attributes.origin_longitude               |
+| destination_latitude    | DECIMAL(9,6) | Latitude of destination          | 1   | sat_line_attributes.destination_latitude           |
+| destination_longitude   | DECIMAL(9,6) | Longitude of destination         | 1   | sat_line_attributes.destination_longitude          |
+| midpoint_latitude       | DECIMAL(9,6) | Midpoint latitude                | 1   | sat_line_attributes.midpoint_latitude              |
+| midpoint_longitude      | DECIMAL(9,6) | Midpoint longitude               | 1   | sat_line_attributes.midpoint_longitude             |
 | status                  | VARCHAR  | Active / Decommissioned / Planned        | 2   | sat_line_status.status                              |
 | start_date              | DATE     | Validity start (SCD2)                    | 2   | Calculated during load                              |
 | end_date                | DATE     | Validity end (SCD2)                      | 2   | Calculated during load                              |
 
-### 4.6 Dim_Region
+*Note: Dim_Transmission_Line does not include a direct state attribute because a line can span multiple states. The state for analytic purposes can be derived from the origin/destination substations via Dim_Substation during ETL, or assigned as a dominant state when building the fact tables.*
 
-| Attribute        | Type     | Description                        | SCD | Vault Source                          |
-|-------------------|----------|---------------------------------------|-----|------------------------------------------|
-| sk_region         | INT PK   | Surrogate key                        | –   | Generated                                 |
-| hash_key_region   | CHAR(32) | Business key                         | –   | hub_region.hash_key_region                |
-| region_name       | VARCHAR  | Region/subsystem name                | 1   | sat_region_attributes.name                 |
-| state_province    | VARCHAR  | State or province                    | 1   | sat_region_attributes.state                 |
-| grid_operator_area| VARCHAR  | ONS operational control area         | 1   | sat_region_attributes.control_area          |
+### 4.6 Dim_State
+
+*(Replaces the former Dim_Region, aligning with the `state` table in OLTP.)*
+
+| Attribute          | Type     | Description                        | SCD | Vault Source                          |
+|--------------------|----------|------------------------------------|-----|----------------------------------------|
+| sk_state           | INT PK   | Surrogate key                      | –   | Generated                              |
+| hash_key_state     | CHAR(32) | Business key                       | –   | hub_state.hash_key_state               |
+| state_code         | VARCHAR(10)| State abbreviation (UF)           | 1   | sat_state_attributes.code              |
+| state_name         | VARCHAR(50)| Full state name                   | 1   | sat_state_attributes.name              |
+| grid_operator_area | VARCHAR(50)| ONS operational control area      | 1   | sat_state_attributes.grid_operator_area |
 
 ### 4.7 Dim_Occurrence_Type
 
@@ -202,7 +223,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_date                | INT FK  | Measurement date                  | dim_date.sk_date                                 |
 | sk_time_of_day         | INT FK  | Measurement minute                | dim_time_of_day.sk_time_of_day                    |
 | sk_power_plant         | INT FK  | Generating plant                  | dim_power_plant.sk_power_plant (valid version at reading date) |
-| sk_region              | INT FK  | Region                            | dim_region.sk_region                              |
+| sk_state               | INT FK  | State where the plant is located  | dim_state.sk_state (via dim_power_plant)          |
 | generation_output_mw   | DECIMAL | Active power generated (instantaneous) | sat_generation_reading.output_mw            |
 | available_capacity_mw  | DECIMAL | Capacity available at that minute | sat_generation_reading.available_capacity           |
 | capacity_factor_pct    | DECIMAL | output / installed_capacity (from the plant version valid at reading date) | Calculated |
@@ -220,7 +241,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_date                | INT FK  | Measurement date                    | dim_date.sk_date                                |
 | sk_time_of_day         | INT FK  | Measurement minute                  | dim_time_of_day.sk_time_of_day                   |
 | sk_transmission_line   | INT FK  | Transmission line                   | dim_transmission_line.sk_transmission_line (valid version at reading date) |
-| sk_region              | INT FK  | Region                              | dim_region.sk_region                              |
+| sk_state               | INT FK  | State (derived from line location – e.g., using the state of the origin substation or a predefined dominant state) | dim_state.sk_state (via ETL logic) |
 | power_flow_mw          | DECIMAL | Active power flow (instantaneous)   | sat_transmission_reading.power_flow_mw             |
 | line_loading_pct       | DECIMAL | flow / thermal_limit                | Calculated (using line characteristics valid at reading date) |
 | losses_mw              | DECIMAL | Transmission losses (instantaneous) | sat_transmission_reading.losses_mw                  |
@@ -230,6 +251,8 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 - Semi-additive: `power_flow_mw`, `losses_mw`
 - Non-additive: `line_loading_pct`
 
+*Note: The state for a transmission line fact can be determined at ETL time by choosing, for example, the state of the origin substation. This allows state-level aggregation of flows even though the line itself spans multiple states.*
+
 ### 5.3 Fact_Power_System_Monitoring
 
 | Attribute              | Type    | Description                        | Vault Source / Rule                       |
@@ -238,14 +261,14 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_time_of_day         | INT FK  | Measurement minute                  | dim_time_of_day.sk_time_of_day                   |
 | sk_substation          | INT FK  | Monitoring point (substation) – used when measurement point is a substation | dim_substation.sk_substation (nullable)          |
 | sk_transmission_line   | INT FK  | Monitoring point (line) – used when measurement point is on a line | dim_transmission_line.sk_transmission_line (nullable) |
-| sk_region              | INT FK  | Region                              | dim_region.sk_region                              |
+| sk_state               | INT FK  | State of the monitoring point       | dim_state.sk_state (derived from the asset: for substation via dim_substation, for line via ETL rule) |
 | frequency_hz           | DECIMAL | System frequency (non-additive)     | sat_system_measurement.frequency                   |
 | voltage_kv             | DECIMAL | Measured voltage (non-additive)     | sat_system_measurement.voltage                     |
 | reliability_index      | DECIMAL | Composite reliability score (non-additive) | sat_system_measurement.reliability_index   |
 | system_load_mw         | DECIMAL | Instantaneous system load (semi-additive) | sat_system_measurement.load_mw            |
 
 **Granularity:** One row per measurement point per minute.  
-**Constraint:** Exactly one of `sk_substation` or `sk_transmission_line` must be non-null; the other must be null. This enforces that a measurement point belongs to exactly one asset type.
+**Constraint:** Exactly one of `sk_substation` or `sk_transmission_line` must be non-null; the other must be null.
 
 **Measure classification:**
 - Semi-additive: `system_load_mw`
@@ -261,7 +284,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_power_plant         | INT FK  | Affected plant (nullable)              | link_occurrence_asset → dim_power_plant (valid version at event date) |
 | sk_substation          | INT FK  | Affected substation (nullable)         | link_occurrence_asset → dim_substation                |
 | sk_transmission_line   | INT FK  | Affected line (nullable)               | link_occurrence_asset → dim_transmission_line          |
-| sk_region              | INT FK  | Region                                 | dim_region.sk_region                                  |
+| sk_state               | INT FK  | State of the affected asset            | dim_state.sk_state (derived from the asset)           |
 | sk_occurrence_type     | INT FK  | Type/category/severity                 | dim_occurrence_type.sk_occurrence_type                 |
 | duration_minutes       | DECIMAL | Time to resolution                     | sat_occurrence_detail.duration_minutes                  |
 | affected_load_mw       | DECIMAL | Load impacted                          | sat_occurrence_detail.affected_load_mw                   |
@@ -282,7 +305,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_power_plant         | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_power_plant (valid version at date) |
 | sk_substation          | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_substation               |
 | sk_transmission_line   | INT FK  | Asset under maintenance (nullable)     | link_maintenance_asset → dim_transmission_line         |
-| sk_region              | INT FK  | Region                                 | dim_region.sk_region                                  |
+| sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)           |
 | sk_maintenance_type    | INT FK  | Category/subtype/priority              | dim_maintenance_type.sk_maintenance_type                |
 | planned_duration_hours | DECIMAL | Planned work duration                  | sat_maintenance_detail.planned_duration_hours            |
 | actual_duration_hours  | DECIMAL | Actual work duration                   | sat_maintenance_detail.actual_duration_hours              |
@@ -306,7 +329,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_power_plant         | INT FK  | Asset (nullable)                       | dim_power_plant.sk_power_plant (valid version at snapshot date) |
 | sk_substation          | INT FK  | Asset (nullable)                       | dim_substation.sk_substation (valid version)        |
 | sk_transmission_line   | INT FK  | Asset (nullable)                       | dim_transmission_line.sk_transmission_line (valid version) |
-| sk_region              | INT FK  | Region                                 | dim_region.sk_region                                  |
+| sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)          |
 | availability_pct       | DECIMAL | % of the day the asset was available   | sat_asset_status.availability_pct                        |
 | in_operation_flag      | BOOLEAN | Whether the asset was in service       | sat_asset_status.in_operation_flag                        |
 | asset_age_years        | DECIMAL | Age since commissioning                | Calculated (snapshot_date − commissioning_date from the valid dimension row) |
@@ -315,3 +338,37 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 **Measure classification:**
 - Semi-additive: `availability_pct`
 - Non-additive: `in_operation_flag`, `asset_age_years`
+
+---
+
+## 6. Glossary and Metadata
+
+| Term                  | Definition                                                                                  | Owner      |
+|-----------------------|----------------------------------------------------------------------------------------------|------------|
+| ONS                   | Operador Nacional do Sistema Elétrico – Brazilian ISO                                         | Operations |
+| Active Power (MW)     | Instantaneous electric power flow                                                            | Engineering|
+| Energy (MWh)          | Integrated power over time, computed as AVG(MW) * hours                                      | Analytics  |
+| Capacity Factor       | Ratio of actual generation to maximum possible generation (nameplate capacity × time)        | Engineering|
+| SCD2                  | Slowly Changing Dimension Type 2 – preserves history by creating a new row                   | Data       |
+| Degenerate Dimension  | Transactional identifier stored directly on the fact table (e.g., work order number)         | Data       |
+| Galaxy Schema         | A dimensional model with multiple fact tables sharing conformed dimensions                   | Data       |
+
+---
+
+## 7. Performance and Security
+
+- **Indexes:** create B-tree indexes on all foreign keys in fact tables; bitmap indexes on frequently filtered dimension columns (e.g., `state_name`, `status`).
+- **Partitioning:** partition fact tables by `sk_date` (year-month) to improve manageability and query performance.
+- **Aggregations:** consider building aggregate tables for common rollups (e.g., daily generation per plant per state, monthly outages per state) to accelerate dashboards.
+- **Row-Level Security (RLS):** if needed, apply filters on `dim_state` to restrict data access by operational area.
+
+---
+
+## 8. Revisions
+
+| Version | Date       | Changes                                                                                                                      | Author           |
+|---------|------------|------------------------------------------------------------------------------------------------------------------------------|------------------|
+| 1.0     | 07/21/2026 | Initial document creation                                                                                                    | Guilherme Roriz  |
+| 1.1     | 07/21/2026 | Refined measure classification, corrected fact granularity notes                                                             | Guilherme Roriz  |
+| 1.2     | 07/21/2026 | Corrected SCD2 join logic in ETL, clarified measure additivity, added glossary, partitioning section                         | Guilherme Roriz  |
+| 1.3     | 07/23/2026 | Replaced Dim_Region with Dim_State, updated all dimensions and facts accordingly, added geographic coordinates to transmission line dimension | Guilherme Roriz  |
