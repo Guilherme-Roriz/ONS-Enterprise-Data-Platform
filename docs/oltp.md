@@ -63,7 +63,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 2.6 Common Reference Domain
 | Table Name | Description                   | Estimated Volume | Primary Key    | Key Columns       |
 |------------|-------------------------------|------------------|----------------|-------------------|
-| region     | Geographical/operational regions | ~15 (static)     | region_id      | region_id, region_code |
+| state     | Geographical/operational regions | ~27 (static)     | state_id      | state_id, state_code |
  
 *Note: `occurrence_type` and `maintenance_type` are listed in their respective domains but are essentially static reference tables.*
 ---
@@ -82,7 +82,8 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | commissioning_date  | DATE          | Date plant entered operation         |                                      |
 | operator_name       | VARCHAR(100)  | Operating company                    |                                      |
 | status              | VARCHAR(20)   | Active / Decommissioned / Under Construction | CHECK (status IN list)         |
-| last_updated        | TIMESTAMP     | Record update timestamp              | DEFAULT NOW()                        |
+| last_updated  | TIMESTAMP     | Record update timestamp              | DEFAULT NOW()                        |
+| estado_id           | INT (FK)      | State Acronym             | NOT NULL           |
  
 **Notes for Data Vault:**
 - `plant_code` becomes the business key in `hub_power_plant`.
@@ -116,11 +117,17 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | line_name              | VARCHAR(100)  | Operational name                         | NOT NULL                             |
 | voltage_level_kv       | DECIMAL(6,1)  | Nominal voltage (kV)                     | > 0                                  |
 | length_km              | DECIMAL(8,2)  | Line length (km)                         | > 0                                  |
-| circuit_type           | VARCHAR(10)   | AC / DC                                  | CHECK (circuit_type IN ('AC','DC'))   |
+| circuit_type           | VARCHAR(10)   | AC / DC                                  | CHECK (circuit_type IN ('AC','DC'))  |
 | origin_substation_id   | INT (FK)      | References substation(substation_id)     | NOT NULL                             |
 | destination_substation_id | INT (FK)   | References substation(substation_id)     | NOT NULL                             |
 | status                 | VARCHAR(20)   | Active / Decommissioned / Planned        | CHECK (status IN list)               |
 | last_updated           | TIMESTAMP     | Record update timestamp                  | DEFAULT NOW()                        |
+| origin_latitude        | DECIMAL(9,6)  | Latitude of the origin substation        | NULL; -90 to 90                      |
+| origin_longitude       | DECIMAL(9,6)  | Longitude of the origin substation       | NULL; -180 to 180                    |
+| destination_latitude   | DECIMAL(9,6)  | Latitude of the destination substation   | NULL; -90 to 90                      |
+| destination_longitude  | DECIMAL(9,6)  | Longitude of the destination substation  | NULL; -180 to 180                    |
+| midpoint_latitude      | DECIMAL(9,6)  | Calculated midpoint latitude             | NULL; -90 to 90                      |
+| midpoint_longitude     | DECIMAL(9,6)  | Calculated midpoint longitude            | NULL; -180 to 180              
  
 **Notes for Data Vault:**
 - `line_code` → `hub_transmission_line` business key.
@@ -140,6 +147,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | substation_type    | VARCHAR(30)   | Step-up / Step-down / Switching         | CHECK (substation_type IN list)      |
 | status             | VARCHAR(20)   | Active / Decommissioned / Planned       | CHECK (status IN list)               |
 | last_updated       | TIMESTAMP     | Record update timestamp                 | DEFAULT NOW()                        |
+| estado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
  
 **Notes for Data Vault:**
 - `substation_code` → `hub_substation` business key.
@@ -221,6 +229,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | category           | VARCHAR(30)   | Outage / Equipment Failure / Alarm / Emergency | CHECK (list)         |
 | subtype            | VARCHAR(50)   | Detailed classification               |                               |
 | severity_level     | VARCHAR(10)   | Low / Medium / High / Critical        | CHECK (list)                  |
+| date               | DATE          |                                       |                               |
  
 **Notes for Data Vault:**
 - Becomes a reference table in the Data Vault (or a small `dim_occurrence_type` directly in the Galaxy). Since it's static, it can be loaded as a reference table or as a satellite of a reference hub.
@@ -291,18 +300,17 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
  
 ---
  
-### 3.13 Table: region
+### 3.13 Table: state
  
 | Column Name        | Data Type     | Description                              | Business Rules                |
 |--------------------|---------------|------------------------------------------|-------------------------------|
-| region_id          | INT (PK)      | Internal surrogate key                   | Auto-increment                |
-| region_code        | VARCHAR(10)   | Business natural key                     | UNIQUE, NOT NULL              |
-| region_name        | VARCHAR(50)   | Region/subsystem name                    | NOT NULL                      |
-| state_province     | VARCHAR(30)   | State or province                        |                               |
+| state_id           | INT (PK)      | Internal surrogate key                   | Auto-increment                |
+| state_code         | VARCHAR(10)   | Business natural key                     | UNIQUE, NOT NULL              |
+| state_name         | VARCHAR(50)   | Region/subsystem name                    | NOT NULL                      |
 | grid_operator_area | VARCHAR(50)   | ONS operational control area             |                               |
  
 **Notes for Data Vault:**
-- `region_code` → `hub_region` business key.
+- `state_id` → `hub_region` business key.
 - Attributes stored in `sat_region_attributes` (static, SCD1).
  
 ---
