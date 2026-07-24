@@ -1,82 +1,3 @@
-# Dimensional Modeling Document – Kimball
-
-**Project:** ONS Enterprise Data Platform
-**Layer:** Galaxy Schema (Analytics)
-**Data Source:** Data Vault (Enterprise Data Warehouse)
-**Author:** Guilherme Roriz
-**Date:** 07/23/2026
-**Version:** 1.4
-
----
-
-## 1. Business Requirements and Scope
-
-### 1.1 Measured Business Processes
-
-| Business Process                             | Description                                                                                                     |
-|-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| Power System Monitoring and Performance        | Monitors system-wide indicators such as frequency, voltage, reliability and overall grid performance.             |
-| Energy Generation                              | Monitors electricity production from power plants, including generation output, capacity and availability.       |
-| Energy Transmission                            | Monitors the transmission network, tracking power flows, installations and emergency incidents.                  |
-| Grid Occurrences                               | Records, monitors and resolves outages, equipment failures, alarms and emergency incidents.                       |
-| Maintenance Monitoring                         | Tracks preventive and corrective maintenance activities, inspections, work orders and asset availability.         |
-| Asset Management                               | Maintains information about power system assets, including power plants, substations and transmission lines.     |
-
-### 1.2 Key Analytical Questions
-
-- How much energy is each power plant generating?
-- Which plants have the highest and lowest generation?
-- What is the generation trend over time?
-- Which transmission lines carry the highest power flow?
-- Which substations are the most critical?
-- Where are transmission bottlenecks occurring?
-- What are the most frequent occurrence types?
-- What is the average outage duration?
-- How many maintenance activities are overdue?
-- Which assets have the lowest availability?
-- Is the system frequency within operational limits?
-- How stable is the electrical grid over time?
-- How many assets are in operation?
-
-### 1.3 Defined Granularities
-
-- **Power System Monitoring and Performance:** One record per measurement point per minute (point belongs to either a substation or a transmission line).
-- **Energy Generation:** One record per power plant per minute.
-- **Energy Transmission:** One record per transmission line per minute.
-- **Grid Occurrences:** One record per occurrence event. If an occurrence affects multiple assets, the event is repeated once per affected asset (each row corresponds to exactly one affected asset).
-- **Maintenance Monitoring:** One record per maintenance activity per asset.
-- **Asset Management:** One record per physical asset per day (status snapshot).
-
----
-
-## 2. Bus Matrix
-
-| Business Process                           | DateTime | Power Plant | Substation | Transmission Line | State | Occurrence | Maintenance |
-|---------------------------------------------|:--------:|:-----------:|:----------:|:------------------:|:-----:|:----------:|:-----------:|
-| **Energy Generation**                       |    ✓     |      ✓      |            |                    |   ✓   |            |             |
-| **Energy Transmission**                     |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |
-| **Grid Occurrences**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |     ✓      |             |
-| **Maintenance Monitoring**                  |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |     ✓       |
-| **Power System Monitoring and Performance** |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |
-| **Asset Management**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |             |
-
----
-
-## 3. Dimensional Model
-
-### 3.1 Conceptual Diagram (Galaxy Schema)
-
-The model is a galaxy (fact constellation) built around six fact tables that share a common set of conformed dimensions:
-Dim_Date ─┐
-Dim_Time_of_Day ─┤
-Dim_Power_Plant ─┤ ┌── Fact_Energy_Generation
-Dim_Substation ──┼──────────┼── Fact_Energy_Transmission
-Dim_Transmission_Line ─┤ ├── Fact_Power_System_Monitoring
-Dim_State ────────┤ ├── Fact_Grid_Occurrence
-Dim_Occurrence_Type ─┤ ├── Fact_Maintenance
-Dim_Maintenance_Type ┘ └── Fact_Asset_Status
-
-text
 
 Power Plant, Substation and Transmission Line act as the three "physical asset" dimensions and are shared across nearly every fact, which is what makes this a galaxy rather than a single star schema.
 
@@ -87,6 +8,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 - **SCD:** Slowly Changing Dimension – Type 1 (overwrite), Type 2 (new row with start/end dates), Type 3 (separate previous/current column).
 - **Vault Source:** indicates which Data Vault table and column the data is extracted from. Table and column names below match the Data Vault Design Document exactly, to avoid ETL ambiguity.
 - **Degenerate Dimension (DD):** an operational identifier (e.g., work order number) stored directly on the fact table with no corresponding dimension table. Degenerate dimensions use the human‑readable business key from the Hub (e.g., `ticket_number`, `order_number`), not the `hash_key_*` column, since the hash key is an internal surrogate not meant for reporting.
+- **Junk Dimension:** a dimension that combines multiple low‑cardinality flags and indicators into a single table to reduce fact table width and improve manageability. Represented by `Dim_Junk_Flags`.
 - **Additive measure:** can be summed across all dimensions (e.g., energy in MWh, duration, cost).
 - **Semi-additive measure:** can be summed across some dimensions but not time (e.g., instantaneous power in MW, capacity, availability %).
 - **Non-additive measure:** cannot be summed meaningfully under any dimension (e.g., frequency in Hz, percentages requiring context) — should be averaged or recalculated.
@@ -214,6 +136,20 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | maintenance_subtype     | VARCHAR | Inspection / Work Order / Overhaul    | 1   | sat_maintenance_type_attributes.subtype    |
 | priority_level          | VARCHAR | Low / Medium / High / Urgent          | 1   | sat_maintenance_type_attributes.priority_level |
 
+### 4.9 Dim_Junk_Flags
+
+*Junk dimension that replaces individual low‑cardinality flags on fact tables, reducing fact table width and simplifying filter management. Each combination of flags is assigned a surrogate key. Flags that do not apply to a given fact row are set to `'N/A'`.*
+
+| Attribute         | Type    | Description                                           | SCD | Vault Source / Rule                                                                                 |
+|-------------------|---------|-------------------------------------------------------|-----|-----------------------------------------------------------------------------------------------------|
+| sk_junk_flags     | INT PK  | Surrogate key                                         | –   | Generated (pre‑loaded with the 27 valid combinations)                                               |
+| resolved_flag     | CHAR(3) | Occurrence resolved? `'Y'` / `'N'` / `'N/A'`           | 1   | `sat_occurrence_detail.resolved_flag` → `'Y'`/`'N'`; otherwise `'N/A'`                             |
+| overdue_flag      | CHAR(3) | Work order overdue? `'Y'` / `'N'` / `'N/A'`            | 1   | `sat_work_order_detail.overdue_flag` → `'Y'`/`'N'`; otherwise `'N/A'`                              |
+| in_operation_flag | CHAR(3) | Asset in service? `'Y'` / `'N'` / `'N/A'`              | 1   | `sat_*_daily_snapshot.in_operation_flag` → `'Y'`/`'N'`; otherwise `'N/A'`                          |
+
+**Pre‑load strategy:**
+The dimension is static and contains all 3³ = 27 rows. It can be re‑generated if new flag combinations become necessary (e.g., a new flag is added to the model), but that is rare.
+
 ---
 
 ## 5. Fact Tables
@@ -288,15 +224,14 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_transmission_line   | INT FK  | Affected line (nullable)               | link_occurrence_asset → dim_transmission_line          |
 | sk_state               | INT FK  | State of the affected asset            | dim_state.sk_state (derived from the asset)           |
 | sk_occurrence_type     | INT FK  | Type/category/severity                 | dim_occurrence_type.sk_occurrence_type                 |
+| sk_junk_flags          | INT FK  | Junk dimension for flags               | dim_junk_flags.sk_junk_flags (resolved_flag = 'Y'/'N', overdue_flag = 'N/A', in_operation_flag = 'N/A') |
 | duration_minutes       | DECIMAL | Time to resolution                     | sat_occurrence_detail.duration_minutes                  |
 | affected_load_mw       | DECIMAL | Load impacted                          | sat_occurrence_detail.affected_load_mw                   |
 | customers_affected     | INT     | Customers impacted                     | sat_occurrence_detail.customers_affected                 |
-| resolved_flag          | BOOLEAN | Whether the occurrence is closed       | sat_occurrence_detail.resolved_flag                       |
 
 **Granularity:** One row per occurrence event per affected asset. If an occurrence affects multiple assets, it is split into multiple rows, each with a single non-null asset FK.  
 **Measure classification:**
 - Additive: `duration_minutes`, `affected_load_mw`, `customers_affected`
-- Non-additive: `resolved_flag`
 
 ### 5.5 Fact_Maintenance
 
@@ -309,21 +244,18 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_transmission_line   | INT FK  | Asset under maintenance (nullable)     | link_work_order_asset → dim_transmission_line         |
 | sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)           |
 | sk_maintenance_type    | INT FK  | Category/subtype/priority              | dim_maintenance_type.sk_maintenance_type                |
+| sk_junk_flags          | INT FK  | Junk dimension for flags               | dim_junk_flags.sk_junk_flags (overdue_flag = 'Y'/'N', resolved_flag = 'N/A', in_operation_flag = 'N/A') |
 | planned_duration_hours | DECIMAL | Planned work duration                  | sat_work_order_detail.planned_duration_hours            |
 | actual_duration_hours  | DECIMAL | Actual work duration                   | sat_work_order_detail.actual_duration_hours              |
 | cost                   | DECIMAL | Maintenance cost                       | sat_work_order_detail.cost                              |
-| overdue_flag           | BOOLEAN | Activity past scheduled date           | sat_work_order_detail.overdue_flag                       |
 | asset_availability_pct | DECIMAL | Asset availability during the period   | sat_work_order_detail.asset_availability_pct                |
 
 **Granularity:** One row per maintenance activity per asset. If a single work order covers multiple assets, it generates multiple rows (one per asset).  
 **Measure classification:**
 - Additive: `planned_duration_hours`, `actual_duration_hours`, `cost`
 - Semi-additive: `asset_availability_pct`
-- Non-additive: `overdue_flag`
 
 ### 5.6 Fact_Asset_Status
-
-*Periodic snapshot fact that complements the master data in the asset dimensions.*
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
 |--------------------------|---------|----------------------------------------|-----------------------------------------------------|
@@ -332,14 +264,14 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | sk_substation          | INT FK  | Asset (nullable)                       | dim_substation.sk_substation (valid version)        |
 | sk_transmission_line   | INT FK  | Asset (nullable)                       | dim_transmission_line.sk_transmission_line (valid version) |
 | sk_state               | INT FK  | State of the asset                     | dim_state.sk_state (derived from the asset)          |
+| sk_junk_flags          | INT FK  | Junk dimension for flags               | dim_junk_flags.sk_junk_flags (in_operation_flag = 'Y'/'N', resolved_flag = 'N/A', overdue_flag = 'N/A') |
 | availability_pct       | DECIMAL | % of the day the asset was available   | sat_power_plant_daily_snapshot.availability_pct / sat_substation_daily_snapshot.availability_pct / sat_line_daily_snapshot.availability_pct (per row's asset type) |
-| in_operation_flag      | BOOLEAN | Whether the asset was in service       | sat_power_plant_daily_snapshot.in_operation_flag / sat_substation_daily_snapshot.in_operation_flag / sat_line_daily_snapshot.in_operation_flag (per row's asset type) |
 | asset_age_years        | DECIMAL | Age since commissioning                | Calculated (snapshot_date − commissioning_date from the valid dimension row); also available pre-calculated on the source snapshot satellites |
 
 **Granularity:** One row per physical asset per day. Exactly one of the asset FKs is non-null.  
 **Measure classification:**
 - Semi-additive: `availability_pct`
-- Non-additive: `in_operation_flag`, `asset_age_years`
+- Non-additive: `asset_age_years`
 
 ---
 
@@ -353,6 +285,7 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | Capacity Factor       | Ratio of actual generation to maximum possible generation (nameplate capacity × time)        | Engineering|
 | SCD2                  | Slowly Changing Dimension Type 2 – preserves history by creating a new row                   | Data       |
 | Degenerate Dimension  | Transactional identifier stored directly on the fact table (e.g., work order number)         | Data       |
+| Junk Dimension        | Dimension combining low‑cardinality flags/indicators to simplify fact tables                 | Data       |
 | Galaxy Schema         | A dimensional model with multiple fact tables sharing conformed dimensions                   | Data       |
 
 ---
@@ -374,4 +307,5 @@ Power Plant, Substation and Transmission Line act as the three "physical asset" 
 | 1.1     | 07/21/2026 | Refined measure classification, corrected fact granularity notes                                                             | Guilherme Roriz  |
 | 1.2     | 07/21/2026 | Corrected SCD2 join logic in ETL, clarified measure additivity, added glossary, partitioning section                         | Guilherme Roriz  |
 | 1.3     | 07/23/2026 | Replaced Dim_Region with Dim_State, updated all dimensions and facts accordingly, added geographic coordinates to transmission line dimension | Guilherme Roriz  |
-| 1.4     | 07/23/2026 | Review pass, aligned all "Vault Source" references with actual Data Vault table/column names: `sat_gen_reading` (not `sat_generation_reading`), `sat_line_measurement`/`sat_substation_measurement` (not `sat_transmission_reading`/`sat_system_measurement`), `link_work_order_asset`/`sat_work_order_detail` (not `link_maintenance_asset`/`sat_maintenance_detail`), split per-asset-type snapshot satellites for Fact_Asset_Status (not a single `sat_asset_status`); corrected satellite column names (`plant_name`, `installed_capacity_mw`, `operator_name`, `substation_name`, `voltage_level_kv`, `substation_type`, `line_code`, `severity_level`, `priority_level`); added missing `hash_key_occurrence_type` and `hash_key_maintenance_type` business-key attributes to Dim_Occurrence_Type/Dim_Maintenance_Type for consistency with the other conformed dimensions; fixed `Dim_State.state_code` source to `hub_state.state_code` (business key lives on the Hub, not on `sat_state_attributes`); changed degenerate dimensions `occurrence_id` and `work_order_number` to source from the human-readable `ticket_number`/`order_number` Hub attributes instead of the internal `hash_key_*` columns | Guilherme Roriz  |
+| 1.4     | 07/23/2026 | Review pass, aligned all "Vault Source" references with actual Data Vault table/column names; corrected satellite column names; added business key attributes to Dim_Occurrence_Type/Dim_Maintenance_Type; fixed Dim_State.state_code source; changed degenerate dimensions to human-readable business keys | Guilherme Roriz  |
+| 1.5     | 07/24/2026 | Introduced Dim_Junk_Flags to replace individual boolean flags on fact tables; adjusted Fact_Grid_Occurrence, Fact_Maintenance, Fact_Asset_Status to reference the junk dimension; added Junk Flags column to bus matrix | Guilherme Roriz  |
