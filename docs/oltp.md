@@ -3,7 +3,7 @@
 **Project:** ONS Enterprise Data Platform  
 **Author:** Guilherme Roriz  
 **Date:** 23/07/2026  
-**Version:** 1.1
+**Version:** 1.2
  
 ---
  
@@ -44,7 +44,7 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 ### 2.3 Grid Occurrences Domain
 | Table Name         | Description                                           | Estimated Volume (rows/day) | Primary Key       | Key Columns                  |
 |--------------------|-------------------------------------------------------|-----------------------------|-------------------|------------------------------|
-| occurrence         | Grid incidents, outages, alarms and emergency events  | ~100 events/day             | occurrence_id     | occurrence_id, ticket_number |
+| occurrence         | Grid incidents, outages, alarms and emergency events  | ~20 events/day             | occurrence_id     | occurrence_id, ticket_number |
 | occurrence_asset   | Links an occurrence to affected assets (plant, substation, line) | ~120 (avg 1.2 assets/event) | (occurrence_id, asset_type, asset_id) | occurrence_id, asset_type, asset_id |
 | occurrence_type    | Reference table for occurrence classification        | ~30 (static)                | occurrence_type_id| type_code                    |
  
@@ -391,3 +391,4 @@ asset_status (independent snapshot table, references assets by asset_type + asse
 |---------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
 | 1.0     | 23/07/2026 | Initial OLTP source documentation                                                                                                                                                                     | Guilherme Roriz  |
 | 1.1     | 23/07/2026 | Review pass: renamed remaining `region`/`region_code`/`link_power_plant_region` references to `state`/`state_code`/`link_power_plant_state` (Section 5); fixed `state` volume figure in Section 4.5 (was incorrectly listed as `region (~15)`, corrected to `state (~27)`); fixed `substation.stado_id` typo to `estado_id` (Section 3.4) to match `plant.estado_id`; removed contradictory statement that `sat_line_attributes` carries SCD2 `status` (Section 3.3) since the Data Vault design tracks `status` only in `sat_line_status`; flagged unmapped `occurrence_type.date` column (Section 3.8); added FK notes for `estado_id` (Section 4.2) | Guilherme Roriz  |
+|1.2    | 24/07/2026 | Short change: occurrence events ~20 (Section 2.3) | Guilherme Roriz |
