@@ -1,77 +1,77 @@
-# OLTP Source System Documentation
  
+# OLTP Source System Documentation
+
 **Project:** ONS Enterprise Data Platform  
 **Author:** Guilherme Roriz  
 **Date:** 23/07/2026  
-**Version:** 1.2
- 
+**Version:** 1.1
+
 ---
- 
+
 ## 1. Overview
- 
+
 Brief description of the OLTP environment: which operational systems supply data to the analytical platform, their purpose, technology stack, and any relevant constraints.
- 
+
 - **System name:** ONS Operational Systems (ERP, SCADA, Maintenance, etc.)
 - **DBMS:** PostgreSQL / Oracle / SQL Server
 - **Scope:** Power generation, transmission, grid occurrences, maintenance, asset management
 - **Connection method:** CDC (change data capture)
- 
+
 ---
- 
+
 ## 2. Source Entities and Relationships
- 
+
 All tables listed below will be ingested directly into the Data Vault (Enterprise Data Warehouse).  
 The Data Lake is reserved exclusively for unstructured and semi-structured data and is not covered here.
- 
+
 ### 2.1 Generation Domain
 | Table Name         | Description                                      | Estimated Volume (rows/day) | Primary Key       | Key Columns                                        |
 |--------------------|--------------------------------------------------|-----------------------------|-------------------|----------------------------------------------------|
 | plant              | Power plant master data                          | ~100 (static, slowly grows) | plant_id          | plant_id, plant_code                               |
 | generation_reading | Minute-level generation measurements per plant   | ~144,000 (100 plants × 1440)| reading_id        | plant_id, reading_timestamp, principal measurements|
- 
+
 ### 2.2 Transmission & System Monitoring Domain
 | Table Name         | Description                                                                 | Estimated Volume (rows/day)            | Primary Key    | Key Columns                     | Principal Measurements (per row)                          |
-|--------------------|-------------------------------------------------------------------------------|----------------------------------------|----------------|---------------------------------|-----------------------------------------------------------|
+|--------------------|-----------------------------------------------------------------------------|----------------------------------------|----------------|---------------------------------|-----------------------------------------------------------|
 | transmission_line  | Transmission line master data                                               | ~500 (static)                          | line_id        | line_id, line_code              | (master data only)                                        |
 | substation         | Substation master data                                                      | ~200 (static)                          | substation_id  | substation_id, substation_code  | (master data only)                                        |
-| measurement        | Minute‑level electric measurements at substations and transmission lines    | ~1 440 000 (1000 points × 1440)       | measurement_id | asset_type, asset_id, reading_timestamp | power_flow_mw, losses_mw, frequency_hz, voltage_kv, system_load_mw, reliability_index |
- 
+| measurement        | Minute‑level electric measurements at substations and transmission lines    | ~1 440 000 (1000 points × 1440)       | measurement_id | asset_type, asset_id, reading_timestamp | power_flow_mw, losses_mw, frequency_hz, voltage_kv, system_load_mw, reliability_index |
+
 **Notes on `measurement`:**
 - Each row belongs to exactly one asset, identified by `asset_type` (`'substation'` or `'transmission_line'`) and `asset_id`.
 - Not all columns are populated for every asset type – e.g., a substation row will have `frequency_hz`, `voltage_kv`, `system_load_mw`, `reliability_index`, while a transmission line row will carry `power_flow_mw`, `losses_mw`, and possibly `voltage_kv` at its endpoints.
 - The table replaces the previously separate `line_reading` and `measurement` tables, providing a single, flexible container for all time‑series telemetry.
- 
+
 ### 2.3 Grid Occurrences Domain
 | Table Name         | Description                                           | Estimated Volume (rows/day) | Primary Key       | Key Columns                  |
 |--------------------|-------------------------------------------------------|-----------------------------|-------------------|------------------------------|
-| occurrence         | Grid incidents, outages, alarms and emergency events  | ~20 events/day             | occurrence_id     | occurrence_id, ticket_number |
+| occurrence         | Grid incidents, outages, alarms and emergency events  | ~100 events/day             | occurrence_id     | occurrence_id, ticket_number |
 | occurrence_asset   | Links an occurrence to affected assets (plant, substation, line) | ~120 (avg 1.2 assets/event) | (occurrence_id, asset_type, asset_id) | occurrence_id, asset_type, asset_id |
 | occurrence_type    | Reference table for occurrence classification        | ~30 (static)                | occurrence_type_id| type_code                    |
- 
+
 ### 2.4 Maintenance Domain
 | Table Name          | Description                                          | Estimated Volume (rows/day) | Primary Key       | Key Columns                     |
-|----------------------|--------------------------------------------------------|-----------------------------|-------------------|---------------------------------|
+|---------------------|------------------------------------------------------|-----------------------------|-------------------|---------------------------------|
 | work_order          | Preventive and corrective maintenance activities     | ~50 work orders/day         | work_order_id     | work_order_id, order_number    |
 | work_order_asset    | Links a work order to affected assets                | ~60 (avg 1.2 assets/order)  | (work_order_id, asset_type, asset_id) | work_order_id, asset_type, asset_id |
 | maintenance_type    | Reference table for maintenance classification       | ~20 (static)                | maintenance_type_id| type_code                       |
- 
+
 ### 2.5 Asset Management Domain
 | Table Name         | Description                                                  | Estimated Volume (rows/day) | Primary Key       | Key Columns                            |
-|--------------------|-------------------------------------------------------------------|-----------------------------|-------------------|------------------------------------------|
+|--------------------|--------------------------------------------------------------|-----------------------------|-------------------|----------------------------------------|
 | asset_status       | Daily snapshot of operational status and availability per asset | ~800 (100 plants + 200 substations + 500 lines) | (snapshot_date, asset_type, asset_id) | snapshot_date, asset_type, asset_id   |
- 
+
 ### 2.6 Common Reference Domain
 | Table Name | Description                   | Estimated Volume | Primary Key    | Key Columns       |
 |------------|-------------------------------|------------------|----------------|-------------------|
-| state     | Geographical/operational regions | ~27 (static)     | state_id      | state_id, state_code |
- 
-*Note: `occurrence_type` and `maintenance_type` are listed in their respective domains but are essentially static reference tables.*
+| state      | Brazilian states (UFs)        | 27 (static)      | state_id       | state_id, state_code |
+
 ---
- 
+
 ## 3. Entity Details
- 
+
 ### 3.1 Table: plant
- 
+
 | Column Name         | Data Type     | Description                          | Business Rules / Constraints        |
 |---------------------|---------------|--------------------------------------|--------------------------------------|
 | plant_id            | INT (PK)      | Internal surrogate ID               | Auto-increment                       |
@@ -81,37 +81,37 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | installed_capacity  | DECIMAL(10,2) | Nameplate capacity (MW)              | > 0                                  |
 | commissioning_date  | DATE          | Date plant entered operation         |                                      |
 | operator_name       | VARCHAR(100)  | Operating company                    |                                      |
+| estado_id           | INT (FK)      | References state(state_id)           | NOT NULL                             |
 | status              | VARCHAR(20)   | Active / Decommissioned / Under Construction | CHECK (status IN list)         |
-| last_updated  | TIMESTAMP     | Record update timestamp              | DEFAULT NOW()                        |
-| estado_id           | INT (FK)      | State Acronym             | NOT NULL           |
- 
+| last_updated        | TIMESTAMP     | Record update timestamp              | DEFAULT NOW()                        |
+
 **Notes for Data Vault:**
 - `plant_code` becomes the business key in `hub_power_plant`.
 - `plant_name`, `plant_type`, `installed_capacity`, `commissioning_date`, `operator_name` are stored in `sat_power_plant_attributes` (SCD2 for `operator_name` and `installed_capacity`).
 - `status` is tracked in `sat_power_plant_status` (SCD2).
- 
+
 ---
- 
+
 ### 3.2 Table: generation_reading
- 
-| Column Name        | Data Type     | Description                                   | Business Rules                       |
-|--------------------|---------------|-------------------------------------------------|--------------------------------------|
-| reading_id         | BIGINT (PK)   | Surrogate key                                | Auto-increment                       |
-| plant_id           | INT (FK)      | References plant(plant_id)                   | NOT NULL                             |
-| reading_timestamp  | TIMESTAMP     | Measurement date/time (UTC)                  | NOT NULL, per-minute                 |
-| output_mw          | DECIMAL(10,2) | Active power generated (MW)                  | >= 0                                 |
-| available_capacity | DECIMAL(10,2) | Available capacity at that moment (MW)       | 0 <= available_capacity <= plant.installed_capacity |
- 
+
+| Column Name          | Data Type     | Description                                   | Business Rules                       |
+|----------------------|---------------|-----------------------------------------------|--------------------------------------|
+| reading_id           | BIGINT (PK)   | Surrogate key                                | Auto-increment                       |
+| plant_id             | INT (FK)      | References plant(plant_id)                   | NOT NULL                             |
+| reading_timestamp    | TIMESTAMP     | Measurement date/time (UTC)                  | NOT NULL, per-minute                 |
+| generation_output_mw | DECIMAL(10,2) | Active power generated (MW)                  | >= 0                                 |
+| available_capacity_mw| DECIMAL(10,2) | Available capacity at that moment (MW)       | 0 <= available_capacity <= plant.installed_capacity |
+
 **Notes for Data Vault:**
-- Feeds a raw satellite `sat_gen_reading` linked to `hub_power_plant` (hash key derived from `plant_code`). The satellite stores `reading_timestamp`, `output_mw`, `available_capacity`.
-- The Galaxy fact table (`Fact_Energy_Generation`) later reads from this satellite via the Business Vault or directly through a view.
- 
+- Feeds a raw satellite `sat_gen_reading` linked to `hub_power_plant` (hash key derived from `plant_code`). The satellite stores `reading_timestamp`, `generation_output_mw`, `available_capacity_mw`.
+- Downstream consumption: consumed by the Business Vault and dimensional layer.
+
 ---
- 
+
 ### 3.3 Table: transmission_line
- 
+
 | Column Name            | Data Type     | Description                               | Business Rules                       |
-|-------------------------|---------------|-----------------------------------------------|--------------------------------------|
+|------------------------|---------------|-------------------------------------------|--------------------------------------|
 | line_id                | INT (PK)      | Internal surrogate ID                    | Auto-increment                       |
 | line_code              | VARCHAR(20)   | Business natural key                     | Unique, stable, used as Vault hub key|
 | line_name              | VARCHAR(100)  | Operational name                         | NOT NULL                             |
@@ -127,39 +127,39 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | destination_latitude   | DECIMAL(9,6)  | Latitude of the destination substation   | NULL; -90 to 90                      |
 | destination_longitude  | DECIMAL(9,6)  | Longitude of the destination substation  | NULL; -180 to 180                    |
 | midpoint_latitude      | DECIMAL(9,6)  | Calculated midpoint latitude             | NULL; -90 to 90                      |
-| midpoint_longitude     | DECIMAL(9,6)  | Calculated midpoint longitude            | NULL; -180 to 180              
- 
+| midpoint_longitude     | DECIMAL(9,6)  | Calculated midpoint longitude            | NULL; -180 to 180                    |
+
 **Notes for Data Vault:**
 - `line_code` → `hub_transmission_line` business key.
-- `line_name`, `voltage_level_kv`, `length_km`, `circuit_type`, `origin_substation_id`, `destination_substation_id` are attributes in `sat_line_attributes` (SCD2 for `voltage_level_kv`).
-- `status` is tracked exclusively in a separate satellite `sat_line_status` (SCD2), not duplicated in `sat_line_attributes`.
- 
+- `line_name`, `voltage_level_kv`, `length_km`, `circuit_type`, `origin_substation_id`, `destination_substation_id` are attributes in `sat_line_attributes` (SCD2 for `voltage_level_kv`, `status`).
+- `status` is also stored in a separate satellite `sat_line_status` for independent history tracking.
+
 ---
- 
+
 ### 3.4 Table: substation
- 
+
 | Column Name        | Data Type     | Description                              | Business Rules                       |
-|--------------------|---------------|----------------------------------------------|--------------------------------------|
+|--------------------|---------------|------------------------------------------|--------------------------------------|
 | substation_id      | INT (PK)      | Internal surrogate ID                   | Auto-increment                       |
 | substation_code    | VARCHAR(20)   | Business natural key                    | Unique, stable                       |
 | substation_name    | VARCHAR(100)  | Substation name                         | NOT NULL                             |
 | voltage_level_kv   | DECIMAL(6,1)  | Primary voltage level (kV)              | > 0                                  |
 | substation_type    | VARCHAR(30)   | Step-up / Step-down / Switching         | CHECK (substation_type IN list)      |
+| estado_id          | INT (FK)      | References state(state_id)              | NOT NULL                             |
 | status             | VARCHAR(20)   | Active / Decommissioned / Planned       | CHECK (status IN list)               |
 | last_updated       | TIMESTAMP     | Record update timestamp                 | DEFAULT NOW()                        |
-| estado_id          | INT (FK)      | State Acronym                           | NOT NULL                             |
- 
+
 **Notes for Data Vault:**
 - `substation_code` → `hub_substation` business key.
 - Attributes stored in `sat_substation_attributes` (SCD2 for `voltage_level_kv`, `status`).
 - `status` also has its own satellite for independent tracking.
- 
+
 ---
- 
+
 ### 3.5 Table: measurement
- 
+
 *(Unified table for all time‑series telemetry from transmission lines and substations.)*
- 
+
 | Column Name        | Data Type     | Description                                          | Business Rules / Constraints                |
 |--------------------|---------------|------------------------------------------------------|----------------------------------------------|
 | measurement_id     | BIGINT (PK)   | Surrogate key                                        | Auto-increment                               |
@@ -172,76 +172,76 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | voltage_kv         | DECIMAL(6,1)  | Measured voltage (kV) — substations & lines          | > 0                                           |
 | system_load_mw     | DECIMAL(10,2) | Instantaneous load (MW) — typically at substations   | >= 0                                          |
 | reliability_index  | DECIMAL(6,4)  | Composite reliability score (0–1)                    | 0 <= reliability_index <= 1                  |
- 
+
 **Business rules:**
 - A row belongs to exactly one asset; `asset_type` + `asset_id` together identify the monitoring point.
 - `power_flow_mw` and `losses_mw` are only populated when `asset_type = 'transmission_line'`; for substations these are NULL.
 - `frequency_hz`, `voltage_kv`, `system_load_mw`, `reliability_index` can be populated for both types but are typical for substations and line endpoints.
 - Missing readings: some minutes may be absent; the ETL only loads existing rows.
- 
+
 **Notes for Data Vault:**
-- This table feeds a raw satellite `sat_measurement` in the Data Vault. The satellite stores `reading_timestamp`, `asset_type` (as part of context), and all measured values.
-- The hash key for the parent entity depends on `asset_type`: it combines with `hub_substation` or `hub_transmission_line` accordingly. The Data Vault design (Section 5.9) implements this as two separate satellites: `sat_substation_measurement` and `sat_line_measurement`, each linked to the respective hub.
-- Galaxy fact tables (`Fact_Energy_Transmission`, `Fact_Power_System_Monitoring`) will consume from these satellites by filtering on `asset_type`.
- 
+- This table feeds two separate raw satellites in the Data Vault: `sat_substation_measurement` (linked to `hub_substation`) and `sat_line_measurement` (linked to `hub_transmission_line`). Splitting by asset type keeps each satellite tightly bound to a single hub, aligning with Data Vault principles.
+- The Galaxy fact table later merges them via UNION to present a unified monitoring view.
+
 ---
- 
+
 ### 3.6 Table: occurrence
- 
+
 | Column Name         | Data Type     | Description                                    | Business Rules / Constraints           |
-|---------------------|---------------|--------------------------------------------------|----------------------------------------|
+|---------------------|---------------|------------------------------------------------|----------------------------------------|
 | occurrence_id       | INT (PK)      | Internal surrogate key                         | Auto-increment                         |
 | ticket_number       | VARCHAR(20)   | Business natural key (work order / event ID)   | UNIQUE, NOT NULL                       |
+| occurrence_type_id  | INT (FK)      | References occurrence_type(occurrence_type_id) | NOT NULL                               |
 | start_datetime      | TIMESTAMP     | Event start date/time (UTC)                    | NOT NULL                               |
 | end_datetime        | TIMESTAMP     | Event resolution date/time (nullable if ongoing)|                                       |
 | resolved_flag       | BOOLEAN       | Whether the occurrence is closed               | DEFAULT FALSE                          |
 | affected_load_mw    | DECIMAL(10,2) | Load impacted (MW)                             | >= 0                                   |
 | customers_affected  | INT           | Number of customers affected                   | >= 0                                   |
 | last_updated        | TIMESTAMP     | Record update timestamp                        | DEFAULT NOW()                          |
- 
+
 **Notes for Data Vault:**
 - `ticket_number` → business key for `hub_occurrence`.
-- `start_datetime`, `end_datetime`, `resolved_flag`, `affected_load_mw`, `customers_affected` go into `sat_occurrence_detail` (SCD1 or SCD2 depending on update policy – usually SCD1 for mutable event data).
-- The link between occurrence and affected assets is via `occurrence_asset`.
- 
+- `start_datetime`, `end_datetime`, `resolved_flag`, `affected_load_mw`, `customers_affected` go into `sat_occurrence_detail`.
+- `occurrence_type_id` will be used to retrieve the `hash_key_occurrence_type` and stored in the same satellite (SCD1).
+- The relationship between occurrence and affected assets is via `occurrence_asset`, split into separate links per asset type.
+
 ---
- 
+
 ### 3.7 Table: occurrence_asset
- 
+
 | Column Name       | Data Type     | Description                                           | Business Rules                |
-|-------------------|---------------|-----------------------------------------------------------|-------------------------------|
+|-------------------|---------------|-------------------------------------------------------|-------------------------------|
 | occurrence_id     | INT (FK)      | References occurrence(occurrence_id)                  | NOT NULL                      |
 | asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'            | NOT NULL, CHECK (list)        |
 | asset_id          | INT           | FK to the respective asset table (plant_id, etc.)     | NOT NULL                      |
- 
+
 **Notes for Data Vault:**
-- This table materializes the many‑to‑many relationship between occurrences and assets. In Data Vault, it is modeled as a **Link table**: `link_occurrence_asset` with hash keys from `hub_occurrence`, `hub_power_plant`, `hub_substation`, `hub_transmission_line` (nullable where not applicable).
-- Only the relevant hub key is populated per row; others remain NULL. Or you could use a generic Link with `asset_type` attribute, but standard Data Vault prefers separate links for each relationship. For simplicity, a single `link_occurrence_asset` with optional foreign hub keys is acceptable.
- 
+- This table is mapped to three separate link tables in the Raw Vault: `link_occurrence_power_plant`, `link_occurrence_substation`, `link_occurrence_transmission_line`. During ETL, the `asset_type` determines which link is populated. No nullable hub keys are used; each link contains only the relevant hub references.
+
 ---
- 
+
 ### 3.8 Table: occurrence_type
- 
+
 | Column Name        | Data Type     | Description                           | Business Rules                |
-|--------------------|---------------|--------------------------------------------|-------------------------------|
+|--------------------|---------------|---------------------------------------|-------------------------------|
 | occurrence_type_id | INT (PK)      | Surrogate key                         | Auto-increment                |
 | type_code          | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
 | category           | VARCHAR(30)   | Outage / Equipment Failure / Alarm / Emergency | CHECK (list)         |
 | subtype            | VARCHAR(50)   | Detailed classification               |                               |
 | severity_level     | VARCHAR(10)   | Low / Medium / High / Critical        | CHECK (list)                  |
-| date               | DATE          | **Unmapped in the current Data Vault design** — business meaning (e.g., date the classification record was created/became effective) needs to be confirmed before this column is dropped or mapped. Tentatively carried into `sat_occurrence_type_attributes.effective_date`. |                               |
- 
+
 **Notes for Data Vault:**
-- Becomes a reference table in the Data Vault (or a small `dim_occurrence_type` directly in the Galaxy). Since it's static, it can be loaded as a reference table or as a satellite of a reference hub.
- 
+- Loaded into `hub_occurrence_type` and `sat_occurrence_type_attributes`. The satellite is referenced directly from `sat_occurrence_detail` via `hash_key_occurrence_type`.
+
 ---
- 
+
 ### 3.9 Table: work_order
- 
+
 | Column Name           | Data Type     | Description                                    | Business Rules                |
-|-----------------------|---------------|----------------------------------------------------|-------------------------------|
+|-----------------------|---------------|------------------------------------------------|-------------------------------|
 | work_order_id         | INT (PK)      | Internal surrogate key                         | Auto-increment                |
 | order_number          | VARCHAR(20)   | Business natural key (work order number)       | UNIQUE, NOT NULL              |
+| maintenance_type_id   | INT (FK)      | References maintenance_type(maintenance_type_id) | NOT NULL                     |
 | scheduled_date        | DATE          | Planned execution date                         |                               |
 | planned_duration_hours| DECIMAL(6,2)  | Planned work duration                          | > 0                           |
 | actual_duration_hours | DECIMAL(6,2)  | Actual work duration (nullable if not completed)| >= 0                         |
@@ -249,74 +249,74 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 | overdue_flag          | BOOLEAN       | Whether the order is past due                  | DEFAULT FALSE                 |
 | asset_availability_pct| DECIMAL(5,2)  | Asset availability during the period (%)       | 0–100                         |
 | last_updated          | TIMESTAMP     | Record update timestamp                        | DEFAULT NOW()                 |
- 
+
 **Notes for Data Vault:**
 - `order_number` → `hub_work_order` business key.
-- All descriptive fields go into `sat_work_order_detail`.
-- Relationship to assets is via `work_order_asset`.
- 
+- All descriptive fields go into `sat_work_order_detail`, which also includes `hash_key_maintenance_type` derived from `maintenance_type_id`.
+- Relationship to assets is via `work_order_asset`, split into three separate links.
+
 ---
- 
+
 ### 3.10 Table: work_order_asset
- 
+
 | Column Name       | Data Type     | Description                                      | Business Rules               |
-|-------------------|---------------|-----------------------------------------------------|------------------------------|
+|-------------------|---------------|--------------------------------------------------|------------------------------|
 | work_order_id     | INT (FK)      | References work_order(work_order_id)             | NOT NULL                     |
 | asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
 | asset_id          | INT           | FK to the respective asset table                 | NOT NULL                     |
- 
+
 **Notes for Data Vault:**
-- Link table `link_work_order_asset` connecting hubs for work order and the specific asset.
- 
+- Mapped to three link tables: `link_work_order_power_plant`, `link_work_order_substation`, `link_work_order_transmission_line`.
+
 ---
- 
+
 ### 3.11 Table: maintenance_type
- 
+
 | Column Name          | Data Type     | Description                           | Business Rules                |
-|----------------------|---------------|--------------------------------------------|-------------------------------|
+|----------------------|---------------|---------------------------------------|-------------------------------|
 | maintenance_type_id  | INT (PK)      | Surrogate key                         | Auto-increment                |
 | type_code            | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
 | category             | VARCHAR(20)   | Preventive / Corrective               | CHECK (list)                  |
 | subtype              | VARCHAR(50)   | Inspection / Work Order / Overhaul    |                               |
 | priority_level       | VARCHAR(10)   | Low / Medium / High / Urgent          | CHECK (list)                  |
- 
+
 **Notes for Data Vault:**
-- Reference table; may be loaded directly into the Galaxy as a mini‑dimension, or stored as a reference table in the Data Vault.
- 
+- Loaded into `hub_maintenance_type` and `sat_maintenance_type_attributes`. Referenced by `sat_work_order_detail`.
+
 ---
- 
+
 ### 3.12 Table: asset_status
- 
+
 | Column Name         | Data Type     | Description                                      | Business Rules               |
-|---------------------|---------------|-----------------------------------------------------|------------------------------|
+|---------------------|---------------|--------------------------------------------------|------------------------------|
 | snapshot_date       | DATE          | Snapshot date                                    | NOT NULL                     |
 | asset_type          | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
 | asset_id            | INT           | FK to the respective asset table                 | NOT NULL                     |
 | availability_pct    | DECIMAL(5,2)  | % of the day the asset was available             | 0–100                        |
 | in_operation_flag   | BOOLEAN       | Whether the asset was in service that day        | DEFAULT TRUE                 |
- 
+
 **Notes for Data Vault:**
-- This is a periodic snapshot. The Data Vault design (Section 5) splits it by `asset_type` into three dedicated satellites — `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, and `sat_line_daily_snapshot` — each linked to the corresponding asset hub, rather than a single generic `sat_asset_status`. The Galaxy fact table `Fact_Asset_Status` reads from all three.
- 
+- Feeds three separate daily snapshot satellites: `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot`. No derived attribute `asset_age_years` is stored in the Raw Vault; that calculation belongs in the Galaxy ETL.
+
 ---
- 
+
 ### 3.13 Table: state
- 
+
 | Column Name        | Data Type     | Description                              | Business Rules                |
-|--------------------|---------------|----------------------------------------------|-------------------------------|
+|--------------------|---------------|------------------------------------------|-------------------------------|
 | state_id           | INT (PK)      | Internal surrogate key                   | Auto-increment                |
 | state_code         | VARCHAR(10)   | Business natural key                     | UNIQUE, NOT NULL              |
-| state_name         | VARCHAR(50)   | Region/subsystem name                    | NOT NULL                      |
-| grid_operator_area | VARCHAR(50)   | ONS operational control area             |                               |
- 
+| state_name         | VARCHAR(50)   | State name                               | NOT NULL                      |
+| ons_control_area   | VARCHAR(50)   | ONS operational control area             |                               |
+
 **Notes for Data Vault:**
 - `state_code` → `hub_state` business key.
 - Attributes stored in `sat_state_attributes` (static, SCD1).
- 
+
 ---
- 
+
 ## 4. Business Rules and Data Quality
- 
+
 ### 4.1 Uniqueness and Business Keys
 - **plant.plant_code** – unique, stable, used as the business key in the Data Vault.
 - **transmission_line.line_code** – unique, stable.
@@ -325,28 +325,27 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 - **work_order.order_number** – unique; identifies a work order.
 - **occurrence_type.type_code** and **maintenance_type.type_code** – unique within their respective domain tables.
 - **state.state_code** – unique.
- 
+
 ### 4.2 Referential Integrity
 - `generation_reading.plant_id` → `plant.plant_id`
 - `measurement.asset_id` → `substation.substation_id` (when `asset_type = 'substation'`)  
   `measurement.asset_id` → `transmission_line.line_id` (when `asset_type = 'transmission_line'`)
 - `transmission_line.origin_substation_id` → `substation.substation_id`
 - `transmission_line.destination_substation_id` → `substation.substation_id`
+- `occurrence.occurrence_type_id` → `occurrence_type.occurrence_type_id`
+- `work_order.maintenance_type_id` → `maintenance_type.maintenance_type_id`
 - `occurrence_asset.occurrence_id` → `occurrence.occurrence_id`; `asset_id` points to the relevant asset table according to `asset_type`
 - `work_order_asset.work_order_id` → `work_order.work_order_id`; `asset_id` points to the relevant asset table according to `asset_type`
-- `plant.estado_id` → `state.state_id`
-- `substation.estado_id` → `state.state_id`
- 
+
 ### 4.3 Handling of Missing and Invalid Data
 - **Generation and measurement readings**: records are expected every minute. Communication failures may cause missing minutes. The ETL process loads only the existing records; it does not fill gaps. The analytics layer may choose to interpolate or ignore missing data.
 - **Null measurements**: In the `measurement` table, columns `power_flow_mw` and `losses_mw` are null for substations; other columns may be null if the monitoring point does not measure that quantity. The Data Vault preserves nulls exactly as received.
 - **Dates/times**: all timestamps are in UTC. The ETL load does not perform time zone conversion.
- 
+
 ### 4.4 Slowly Changing Dimensions (SCD) and History
- 
 - The OLTP **overwrites** master data (e.g., `operator_name`, `status`, `voltage_level_kv`). It does not maintain history on its own.
 - **However**, the Data Vault is designed to capture and preserve all historical changes: during each ETL load, the current OLTP values are compared with the latest satellite records. When a change is detected, the old satellite row is closed (by setting `end_date`) and a new row is inserted, thus building a full history that the source system lacks.
-- This SCD Type 2 mechanism ensures that the Galaxy dimensions (e.g., `Dim_Power_Plant`) can answer both "current state" and "as-of historical state" queries.
+- This SCD Type 2 mechanism ensures that the Galaxy dimensions can answer both "current state" and "as-of historical state" queries.
 - For event tables (`occurrence`, `work_order`), which may be updated (e.g., closing an occurrence), the Data Vault either overwrites the corresponding satellite attributes (SCD Type 1) or keeps additional satellites for audit, depending on the project's requirements.
 - **In summary:** the OLTP provides the current snapshot; the Data Vault creates and stores the complete change history needed for analytics.
 
@@ -357,38 +356,475 @@ The Data Lake is reserved exclusively for unstructured and semi-structured data 
 - **Relationship tables**: `occurrence_asset` (~120 rows/day), `work_order_asset` (~60 rows/day).
 - A partitioning strategy in the Data Vault and Galaxy (by month/year) will be employed to manage the large volume of readings.
 
- 
+---
+
 ## 5. Entity-Relationship Overview
- 
+
 plant (1) ──────< (M) generation_reading
- 
+
 transmission_line (1) ──< (M) measurement (asset_type = 'transmission_line')
 substation (1) ─────────< (M) measurement (asset_type = 'substation')
- 
+
 occurrence (1) ──< (M) occurrence_asset >── (M) asset (plant / substation / transmission_line)
+occurrence (M) ── references ── (1) occurrence_type
+
 work_order (1) ──< (M) work_order_asset >── (M) asset (plant / substation / transmission_line)
- 
+work_order (M) ── references ── (1) maintenance_type
+
 transmission_line (M) ── references ── (1) substation (origin)
 transmission_line (M) ── references ── (1) substation (destination)
- 
-occurrence_type (independent reference table)
-maintenance_type (independent reference table)
-state (independent reference table, no direct FK from assets in the OLTP; relationships modeled in the Data Vault via link tables)
- 
- 
-**Notes:**
-- The tables `measurement`, `occurrence_asset`, `work_order_asset` and `asset_status` use the pair `asset_type` + `asset_id` to dynamically reference any asset type, avoiding multiple physical foreign keys.
-- Although `plant.estado_id` and `substation.estado_id` are physical FKs in the OLTP, the Data Vault still models the plant/substation‑to‑state relationship via link tables (`link_power_plant_state`, `link_substation_state`), allowing an asset's state assignment to change over time and preserving full history — which a simple FK overwrite in the OLTP cannot do.
-- The diagram above shows the primary logical dependencies, sufficient for guiding extraction and modeling in the Data Vault.
+
+plant (M) ── references ── (1) state
+substation (M) ── references ── (1) state
 
 asset_status (independent snapshot table, references assets by asset_type + asset_id)
 
+
+**Notes:**
+- The polymorphic tables `measurement`, `occurrence_asset`, `work_order_asset` and `asset_status` use `asset_type` + `asset_id` to dynamically reference any asset type. This design is handled at the application/ETL layer; no database‑level FK constraints span multiple target tables.
+- The diagram shows logical dependencies; referential integrity for polymorphic relationships is enforced by the ETL code.
+
 ---
 
-## 6. Revision History
+## 6. Source-to-Target Mapping (OLTP → Data Vault)
 
-| Version | Date       | Changes                                                                                                                                                                                                 | Author           |
-|---------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
-| 1.0     | 23/07/2026 | Initial OLTP source documentation                                                                                                                                                                     | Guilherme Roriz  |
-| 1.1     | 23/07/2026 | Review pass: renamed remaining `region`/`region_code`/`link_power_plant_region` references to `state`/`state_code`/`link_power_plant_state` (Section 5); fixed `state` volume figure in Section 4.5 (was incorrectly listed as `region (~15)`, corrected to `state (~27)`); fixed `substation.stado_id` typo to `estado_id` (Section 3.4) to match `plant.estado_id`; removed contradictory statement that `sat_line_attributes` carries SCD2 `status` (Section 3.3) since the Data Vault design tracks `status` only in `sat_line_status`; flagged unmapped `occurrence_type.date` column (Section 3.8); added FK notes for `estado_id` (Section 4.2) | Guilherme Roriz  |
-|1.2    | 24/07/2026 | Short change: occurrence events ~20 (Section 2.3) | Guilherme Roriz |
+| OLTP Table               | Target Hub/Link/Satellite(s)                                                                                           |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------|
+| plant                     | `hub_power_plant`, `sat_power_plant_attributes`, `sat_power_plant_status`, `link_power_plant_state`                    |
+| generation_reading        | `sat_gen_reading` (using `hub_power_plant` hash)                                                                       |
+| transmission_line         | `hub_transmission_line`, `sat_line_attributes`, `sat_line_status`, `link_transmission_line_substation` (2 rows: origin & destination) |
+| substation                | `hub_substation`, `sat_substation_attributes`, `sat_substation_status`, `link_substation_state`                        |
+| measurement               | `sat_substation_measurement` (for substation rows), `sat_line_measurement` (for line rows)                             |
+| occurrence                | `hub_occurrence`, `sat_occurrence_detail` (includes `hash_key_occurrence_type`)                                        |
+| occurrence_asset          | `link_occurrence_power_plant` / `link_occurrence_substation` / `link_occurrence_transmission_line` (depending on asset_type) |
+| occurrence_type           | `hub_occurrence_type`, `sat_occurrence_type_attributes`                                                                |
+| work_order                | `hub_work_order`, `sat_work_order_detail` (includes `hash_key_maintenance_type`)                                       |
+| work_order_asset          | `link_work_order_power_plant` / `link_work_order_substation` / `link_work_order_transmission_line`                     |
+| maintenance_type          | `hub_maintenance_type`, `sat_maintenance_type_attributes`                                                              |
+| asset_status              | `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot` (split by `asset_type`)    |
+| state                     | `hub_state`, `sat_state_attributes`                                                                                    |
+
+---
+
+## 7. Revision History
+
+| Version | Date       | Changes                                                                                              | Author           |
+|---------|------------|------------------------------------------------------------------------------------------------------|------------------|
+| 1.0     | 23/07/2026 | Initial creation                                                                                     | Guilherme Roriz  |
+| 1.1     | 24/07/2026 | Added `occurrence_type_id` FK to `occurrence`, `maintenance_type_id` FK to `work_order`; renamed `output_mw` to `generation_output_mw` and `available_capacity` to `available_capacity_mw`; renamed `grid_operator_area` to `ons_control_area`; removed all legacy "region" references; updated ER and ETL mapping | Guilherme Roriz  |
+
+ 
+# OLTP Source System Documentation
+
+**Project:** ONS Enterprise Data Platform  
+**Author:** Guilherme Roriz  
+**Date:** 23/07/2026  
+**Version:** 1.1
+
+---
+
+## 1. Overview
+
+Brief description of the OLTP environment: which operational systems supply data to the analytical platform, their purpose, technology stack, and any relevant constraints.
+
+- **System name:** ONS Operational Systems (ERP, SCADA, Maintenance, etc.)
+- **DBMS:** PostgreSQL / Oracle / SQL Server
+- **Scope:** Power generation, transmission, grid occurrences, maintenance, asset management
+- **Connection method:** CDC (change data capture)
+
+---
+
+## 2. Source Entities and Relationships
+
+All tables listed below will be ingested directly into the Data Vault (Enterprise Data Warehouse).  
+The Data Lake is reserved exclusively for unstructured and semi-structured data and is not covered here.
+
+### 2.1 Generation Domain
+| Table Name         | Description                                      | Estimated Volume (rows/day) | Primary Key       | Key Columns                                        |
+|--------------------|--------------------------------------------------|-----------------------------|-------------------|----------------------------------------------------|
+| plant              | Power plant master data                          | ~100 (static, slowly grows) | plant_id          | plant_id, plant_code                               |
+| generation_reading | Minute-level generation measurements per plant   | ~144,000 (100 plants × 1440)| reading_id        | plant_id, reading_timestamp, principal measurements|
+
+### 2.2 Transmission & System Monitoring Domain
+| Table Name         | Description                                                                 | Estimated Volume (rows/day)            | Primary Key    | Key Columns                     | Principal Measurements (per row)                          |
+|--------------------|-----------------------------------------------------------------------------|----------------------------------------|----------------|---------------------------------|-----------------------------------------------------------|
+| transmission_line  | Transmission line master data                                               | ~500 (static)                          | line_id        | line_id, line_code              | (master data only)                                        |
+| substation         | Substation master data                                                      | ~200 (static)                          | substation_id  | substation_id, substation_code  | (master data only)                                        |
+| measurement        | Minute‑level electric measurements at substations and transmission lines    | ~1 440 000 (1000 points × 1440)       | measurement_id | asset_type, asset_id, reading_timestamp | power_flow_mw, losses_mw, frequency_hz, voltage_kv, system_load_mw, reliability_index |
+
+**Notes on `measurement`:**
+- Each row belongs to exactly one asset, identified by `asset_type` (`'substation'` or `'transmission_line'`) and `asset_id`.
+- Not all columns are populated for every asset type – e.g., a substation row will have `frequency_hz`, `voltage_kv`, `system_load_mw`, `reliability_index`, while a transmission line row will carry `power_flow_mw`, `losses_mw`, and possibly `voltage_kv` at its endpoints.
+- The table replaces the previously separate `line_reading` and `measurement` tables, providing a single, flexible container for all time‑series telemetry.
+
+### 2.3 Grid Occurrences Domain
+| Table Name         | Description                                           | Estimated Volume (rows/day) | Primary Key       | Key Columns                  |
+|--------------------|-------------------------------------------------------|-----------------------------|-------------------|------------------------------|
+| occurrence         | Grid incidents, outages, alarms and emergency events  | ~100 events/day             | occurrence_id     | occurrence_id, ticket_number |
+| occurrence_asset   | Links an occurrence to affected assets (plant, substation, line) | ~120 (avg 1.2 assets/event) | (occurrence_id, asset_type, asset_id) | occurrence_id, asset_type, asset_id |
+| occurrence_type    | Reference table for occurrence classification        | ~30 (static)                | occurrence_type_id| type_code                    |
+
+### 2.4 Maintenance Domain
+| Table Name          | Description                                          | Estimated Volume (rows/day) | Primary Key       | Key Columns                     |
+|---------------------|------------------------------------------------------|-----------------------------|-------------------|---------------------------------|
+| work_order          | Preventive and corrective maintenance activities     | ~50 work orders/day         | work_order_id     | work_order_id, order_number    |
+| work_order_asset    | Links a work order to affected assets                | ~60 (avg 1.2 assets/order)  | (work_order_id, asset_type, asset_id) | work_order_id, asset_type, asset_id |
+| maintenance_type    | Reference table for maintenance classification       | ~20 (static)                | maintenance_type_id| type_code                       |
+
+### 2.5 Asset Management Domain
+| Table Name         | Description                                                  | Estimated Volume (rows/day) | Primary Key       | Key Columns                            |
+|--------------------|--------------------------------------------------------------|-----------------------------|-------------------|----------------------------------------|
+| asset_status       | Daily snapshot of operational status and availability per asset | ~800 (100 plants + 200 substations + 500 lines) | (snapshot_date, asset_type, asset_id) | snapshot_date, asset_type, asset_id   |
+
+### 2.6 Common Reference Domain
+| Table Name | Description                   | Estimated Volume | Primary Key    | Key Columns       |
+|------------|-------------------------------|------------------|----------------|-------------------|
+| state      | Brazilian states (UFs)        | 27 (static)      | state_id       | state_id, state_code |
+
+---
+
+## 3. Entity Details
+
+### 3.1 Table: plant
+
+| Column Name         | Data Type     | Description                          | Business Rules / Constraints        |
+|---------------------|---------------|--------------------------------------|--------------------------------------|
+| plant_id            | INT (PK)      | Internal surrogate ID               | Auto-increment                       |
+| plant_code          | VARCHAR(20)   | Business natural key                | Unique, stable, used as Vault hub key|
+| plant_name          | VARCHAR(100)  | Name                                 | NOT NULL                             |
+| plant_type          | VARCHAR(50)   | Hydro / Thermal / Wind / Solar / Nuclear | CHECK (plant_type IN list)        |
+| installed_capacity  | DECIMAL(10,2) | Nameplate capacity (MW)              | > 0                                  |
+| commissioning_date  | DATE          | Date plant entered operation         |                                      |
+| operator_name       | VARCHAR(100)  | Operating company                    |                                      |
+| estado_id           | INT (FK)      | References state(state_id)           | NOT NULL                             |
+| status              | VARCHAR(20)   | Active / Decommissioned / Under Construction | CHECK (status IN list)         |
+| last_updated        | TIMESTAMP     | Record update timestamp              | DEFAULT NOW()                        |
+
+**Notes for Data Vault:**
+- `plant_code` becomes the business key in `hub_power_plant`.
+- `plant_name`, `plant_type`, `installed_capacity`, `commissioning_date`, `operator_name` are stored in `sat_power_plant_attributes` (SCD2 for `operator_name` and `installed_capacity`).
+- `status` is tracked in `sat_power_plant_status` (SCD2).
+
+---
+
+### 3.2 Table: generation_reading
+
+| Column Name          | Data Type     | Description                                   | Business Rules                       |
+|----------------------|---------------|-----------------------------------------------|--------------------------------------|
+| reading_id           | BIGINT (PK)   | Surrogate key                                | Auto-increment                       |
+| plant_id             | INT (FK)      | References plant(plant_id)                   | NOT NULL                             |
+| reading_timestamp    | TIMESTAMP     | Measurement date/time (UTC)                  | NOT NULL, per-minute                 |
+| generation_output_mw | DECIMAL(10,2) | Active power generated (MW)                  | >= 0                                 |
+| available_capacity_mw| DECIMAL(10,2) | Available capacity at that moment (MW)       | 0 <= available_capacity <= plant.installed_capacity |
+
+**Notes for Data Vault:**
+- Feeds a raw satellite `sat_gen_reading` linked to `hub_power_plant` (hash key derived from `plant_code`). The satellite stores `reading_timestamp`, `generation_output_mw`, `available_capacity_mw`.
+- Downstream consumption: consumed by the Business Vault and dimensional layer.
+
+---
+
+### 3.3 Table: transmission_line
+
+| Column Name            | Data Type     | Description                               | Business Rules                       |
+|------------------------|---------------|-------------------------------------------|--------------------------------------|
+| line_id                | INT (PK)      | Internal surrogate ID                    | Auto-increment                       |
+| line_code              | VARCHAR(20)   | Business natural key                     | Unique, stable, used as Vault hub key|
+| line_name              | VARCHAR(100)  | Operational name                         | NOT NULL                             |
+| voltage_level_kv       | DECIMAL(6,1)  | Nominal voltage (kV)                     | > 0                                  |
+| length_km              | DECIMAL(8,2)  | Line length (km)                         | > 0                                  |
+| circuit_type           | VARCHAR(10)   | AC / DC                                  | CHECK (circuit_type IN ('AC','DC'))  |
+| origin_substation_id   | INT (FK)      | References substation(substation_id)     | NOT NULL                             |
+| destination_substation_id | INT (FK)   | References substation(substation_id)     | NOT NULL                             |
+| status                 | VARCHAR(20)   | Active / Decommissioned / Planned        | CHECK (status IN list)               |
+| last_updated           | TIMESTAMP     | Record update timestamp                  | DEFAULT NOW()                        |
+| origin_latitude        | DECIMAL(9,6)  | Latitude of the origin substation        | NULL; -90 to 90                      |
+| origin_longitude       | DECIMAL(9,6)  | Longitude of the origin substation       | NULL; -180 to 180                    |
+| destination_latitude   | DECIMAL(9,6)  | Latitude of the destination substation   | NULL; -90 to 90                      |
+| destination_longitude  | DECIMAL(9,6)  | Longitude of the destination substation  | NULL; -180 to 180                    |
+| midpoint_latitude      | DECIMAL(9,6)  | Calculated midpoint latitude             | NULL; -90 to 90                      |
+| midpoint_longitude     | DECIMAL(9,6)  | Calculated midpoint longitude            | NULL; -180 to 180                    |
+
+**Notes for Data Vault:**
+- `line_code` → `hub_transmission_line` business key.
+- `line_name`, `voltage_level_kv`, `length_km`, `circuit_type`, `origin_substation_id`, `destination_substation_id` are attributes in `sat_line_attributes` (SCD2 for `voltage_level_kv`, `status`).
+- `status` is also stored in a separate satellite `sat_line_status` for independent history tracking.
+
+---
+
+### 3.4 Table: substation
+
+| Column Name        | Data Type     | Description                              | Business Rules                       |
+|--------------------|---------------|------------------------------------------|--------------------------------------|
+| substation_id      | INT (PK)      | Internal surrogate ID                   | Auto-increment                       |
+| substation_code    | VARCHAR(20)   | Business natural key                    | Unique, stable                       |
+| substation_name    | VARCHAR(100)  | Substation name                         | NOT NULL                             |
+| voltage_level_kv   | DECIMAL(6,1)  | Primary voltage level (kV)              | > 0                                  |
+| substation_type    | VARCHAR(30)   | Step-up / Step-down / Switching         | CHECK (substation_type IN list)      |
+| estado_id          | INT (FK)      | References state(state_id)              | NOT NULL                             |
+| status             | VARCHAR(20)   | Active / Decommissioned / Planned       | CHECK (status IN list)               |
+| last_updated       | TIMESTAMP     | Record update timestamp                 | DEFAULT NOW()                        |
+
+**Notes for Data Vault:**
+- `substation_code` → `hub_substation` business key.
+- Attributes stored in `sat_substation_attributes` (SCD2 for `voltage_level_kv`, `status`).
+- `status` also has its own satellite for independent tracking.
+
+---
+
+### 3.5 Table: measurement
+
+*(Unified table for all time‑series telemetry from transmission lines and substations.)*
+
+| Column Name        | Data Type     | Description                                          | Business Rules / Constraints                |
+|--------------------|---------------|------------------------------------------------------|----------------------------------------------|
+| measurement_id     | BIGINT (PK)   | Surrogate key                                        | Auto-increment                               |
+| asset_type         | VARCHAR(20)   | Type of asset: 'substation' or 'transmission_line'   | NOT NULL, CHECK (asset_type IN list)          |
+| asset_id           | INT           | FK to substation.substation_id or transmission_line.line_id | NOT NULL                                     |
+| reading_timestamp  | TIMESTAMP     | Measurement date/time (UTC)                          | NOT NULL, per-minute                          |
+| power_flow_mw      | DECIMAL(10,2) | Active power flow (MW) — only for lines              | NULL for substations; >= 0 when present       |
+| losses_mw          | DECIMAL(10,2) | Transmission losses (MW) — only for lines            | NULL for substations; >= 0 when present       |
+| frequency_hz       | DECIMAL(6,2)  | System frequency (Hz) — substations & lines          | 50.0 or 60.0 nominal range                   |
+| voltage_kv         | DECIMAL(6,1)  | Measured voltage (kV) — substations & lines          | > 0                                           |
+| system_load_mw     | DECIMAL(10,2) | Instantaneous load (MW) — typically at substations   | >= 0                                          |
+| reliability_index  | DECIMAL(6,4)  | Composite reliability score (0–1)                    | 0 <= reliability_index <= 1                  |
+
+**Business rules:**
+- A row belongs to exactly one asset; `asset_type` + `asset_id` together identify the monitoring point.
+- `power_flow_mw` and `losses_mw` are only populated when `asset_type = 'transmission_line'`; for substations these are NULL.
+- `frequency_hz`, `voltage_kv`, `system_load_mw`, `reliability_index` can be populated for both types but are typical for substations and line endpoints.
+- Missing readings: some minutes may be absent; the ETL only loads existing rows.
+
+**Notes for Data Vault:**
+- This table feeds two separate raw satellites in the Data Vault: `sat_substation_measurement` (linked to `hub_substation`) and `sat_line_measurement` (linked to `hub_transmission_line`). Splitting by asset type keeps each satellite tightly bound to a single hub, aligning with Data Vault principles.
+- The Galaxy fact table later merges them via UNION to present a unified monitoring view.
+
+---
+
+### 3.6 Table: occurrence
+
+| Column Name         | Data Type     | Description                                    | Business Rules / Constraints           |
+|---------------------|---------------|------------------------------------------------|----------------------------------------|
+| occurrence_id       | INT (PK)      | Internal surrogate key                         | Auto-increment                         |
+| ticket_number       | VARCHAR(20)   | Business natural key (work order / event ID)   | UNIQUE, NOT NULL                       |
+| occurrence_type_id  | INT (FK)      | References occurrence_type(occurrence_type_id) | NOT NULL                               |
+| start_datetime      | TIMESTAMP     | Event start date/time (UTC)                    | NOT NULL                               |
+| end_datetime        | TIMESTAMP     | Event resolution date/time (nullable if ongoing)|                                       |
+| resolved_flag       | BOOLEAN       | Whether the occurrence is closed               | DEFAULT FALSE                          |
+| affected_load_mw    | DECIMAL(10,2) | Load impacted (MW)                             | >= 0                                   |
+| customers_affected  | INT           | Number of customers affected                   | >= 0                                   |
+| last_updated        | TIMESTAMP     | Record update timestamp                        | DEFAULT NOW()                          |
+
+**Notes for Data Vault:**
+- `ticket_number` → business key for `hub_occurrence`.
+- `start_datetime`, `end_datetime`, `resolved_flag`, `affected_load_mw`, `customers_affected` go into `sat_occurrence_detail`.
+- `occurrence_type_id` will be used to retrieve the `hash_key_occurrence_type` and stored in the same satellite (SCD1).
+- The relationship between occurrence and affected assets is via `occurrence_asset`, split into separate links per asset type.
+
+---
+
+### 3.7 Table: occurrence_asset
+
+| Column Name       | Data Type     | Description                                           | Business Rules                |
+|-------------------|---------------|-------------------------------------------------------|-------------------------------|
+| occurrence_id     | INT (FK)      | References occurrence(occurrence_id)                  | NOT NULL                      |
+| asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'            | NOT NULL, CHECK (list)        |
+| asset_id          | INT           | FK to the respective asset table (plant_id, etc.)     | NOT NULL                      |
+
+**Notes for Data Vault:**
+- This table is mapped to three separate link tables in the Raw Vault: `link_occurrence_power_plant`, `link_occurrence_substation`, `link_occurrence_transmission_line`. During ETL, the `asset_type` determines which link is populated. No nullable hub keys are used; each link contains only the relevant hub references.
+
+---
+
+### 3.8 Table: occurrence_type
+
+| Column Name        | Data Type     | Description                           | Business Rules                |
+|--------------------|---------------|---------------------------------------|-------------------------------|
+| occurrence_type_id | INT (PK)      | Surrogate key                         | Auto-increment                |
+| type_code          | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
+| category           | VARCHAR(30)   | Outage / Equipment Failure / Alarm / Emergency | CHECK (list)         |
+| subtype            | VARCHAR(50)   | Detailed classification               |                               |
+| severity_level     | VARCHAR(10)   | Low / Medium / High / Critical        | CHECK (list)                  |
+
+**Notes for Data Vault:**
+- Loaded into `hub_occurrence_type` and `sat_occurrence_type_attributes`. The satellite is referenced directly from `sat_occurrence_detail` via `hash_key_occurrence_type`.
+
+---
+
+### 3.9 Table: work_order
+
+| Column Name           | Data Type     | Description                                    | Business Rules                |
+|-----------------------|---------------|------------------------------------------------|-------------------------------|
+| work_order_id         | INT (PK)      | Internal surrogate key                         | Auto-increment                |
+| order_number          | VARCHAR(20)   | Business natural key (work order number)       | UNIQUE, NOT NULL              |
+| maintenance_type_id   | INT (FK)      | References maintenance_type(maintenance_type_id) | NOT NULL                     |
+| scheduled_date        | DATE          | Planned execution date                         |                               |
+| planned_duration_hours| DECIMAL(6,2)  | Planned work duration                          | > 0                           |
+| actual_duration_hours | DECIMAL(6,2)  | Actual work duration (nullable if not completed)| >= 0                         |
+| cost                  | DECIMAL(12,2) | Maintenance cost                               | >= 0                          |
+| overdue_flag          | BOOLEAN       | Whether the order is past due                  | DEFAULT FALSE                 |
+| asset_availability_pct| DECIMAL(5,2)  | Asset availability during the period (%)       | 0–100                         |
+| last_updated          | TIMESTAMP     | Record update timestamp                        | DEFAULT NOW()                 |
+
+**Notes for Data Vault:**
+- `order_number` → `hub_work_order` business key.
+- All descriptive fields go into `sat_work_order_detail`, which also includes `hash_key_maintenance_type` derived from `maintenance_type_id`.
+- Relationship to assets is via `work_order_asset`, split into three separate links.
+
+---
+
+### 3.10 Table: work_order_asset
+
+| Column Name       | Data Type     | Description                                      | Business Rules               |
+|-------------------|---------------|--------------------------------------------------|------------------------------|
+| work_order_id     | INT (FK)      | References work_order(work_order_id)             | NOT NULL                     |
+| asset_type        | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
+| asset_id          | INT           | FK to the respective asset table                 | NOT NULL                     |
+
+**Notes for Data Vault:**
+- Mapped to three link tables: `link_work_order_power_plant`, `link_work_order_substation`, `link_work_order_transmission_line`.
+
+---
+
+### 3.11 Table: maintenance_type
+
+| Column Name          | Data Type     | Description                           | Business Rules                |
+|----------------------|---------------|---------------------------------------|-------------------------------|
+| maintenance_type_id  | INT (PK)      | Surrogate key                         | Auto-increment                |
+| type_code            | VARCHAR(10)   | Short code (unique)                   | UNIQUE, NOT NULL              |
+| category             | VARCHAR(20)   | Preventive / Corrective               | CHECK (list)                  |
+| subtype              | VARCHAR(50)   | Inspection / Work Order / Overhaul    |                               |
+| priority_level       | VARCHAR(10)   | Low / Medium / High / Urgent          | CHECK (list)                  |
+
+**Notes for Data Vault:**
+- Loaded into `hub_maintenance_type` and `sat_maintenance_type_attributes`. Referenced by `sat_work_order_detail`.
+
+---
+
+### 3.12 Table: asset_status
+
+| Column Name         | Data Type     | Description                                      | Business Rules               |
+|---------------------|---------------|--------------------------------------------------|------------------------------|
+| snapshot_date       | DATE          | Snapshot date                                    | NOT NULL                     |
+| asset_type          | VARCHAR(20)   | 'plant', 'substation', 'transmission_line'       | NOT NULL, CHECK (list)       |
+| asset_id            | INT           | FK to the respective asset table                 | NOT NULL                     |
+| availability_pct    | DECIMAL(5,2)  | % of the day the asset was available             | 0–100                        |
+| in_operation_flag   | BOOLEAN       | Whether the asset was in service that day        | DEFAULT TRUE                 |
+
+**Notes for Data Vault:**
+- Feeds three separate daily snapshot satellites: `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot`. No derived attribute `asset_age_years` is stored in the Raw Vault; that calculation belongs in the Galaxy ETL.
+
+---
+
+### 3.13 Table: state
+
+| Column Name        | Data Type     | Description                              | Business Rules                |
+|--------------------|---------------|------------------------------------------|-------------------------------|
+| state_id           | INT (PK)      | Internal surrogate key                   | Auto-increment                |
+| state_code         | VARCHAR(10)   | Business natural key                     | UNIQUE, NOT NULL              |
+| state_name         | VARCHAR(50)   | State name                               | NOT NULL                      |
+| ons_control_area   | VARCHAR(50)   | ONS operational control area             |                               |
+
+**Notes for Data Vault:**
+- `state_code` → `hub_state` business key.
+- Attributes stored in `sat_state_attributes` (static, SCD1).
+
+---
+
+## 4. Business Rules and Data Quality
+
+### 4.1 Uniqueness and Business Keys
+- **plant.plant_code** – unique, stable, used as the business key in the Data Vault.
+- **transmission_line.line_code** – unique, stable.
+- **substation.substation_code** – unique, stable.
+- **occurrence.ticket_number** – unique; universally identifies an event.
+- **work_order.order_number** – unique; identifies a work order.
+- **occurrence_type.type_code** and **maintenance_type.type_code** – unique within their respective domain tables.
+- **state.state_code** – unique.
+
+### 4.2 Referential Integrity
+- `generation_reading.plant_id` → `plant.plant_id`
+- `measurement.asset_id` → `substation.substation_id` (when `asset_type = 'substation'`)  
+  `measurement.asset_id` → `transmission_line.line_id` (when `asset_type = 'transmission_line'`)
+- `transmission_line.origin_substation_id` → `substation.substation_id`
+- `transmission_line.destination_substation_id` → `substation.substation_id`
+- `occurrence.occurrence_type_id` → `occurrence_type.occurrence_type_id`
+- `work_order.maintenance_type_id` → `maintenance_type.maintenance_type_id`
+- `occurrence_asset.occurrence_id` → `occurrence.occurrence_id`; `asset_id` points to the relevant asset table according to `asset_type`
+- `work_order_asset.work_order_id` → `work_order.work_order_id`; `asset_id` points to the relevant asset table according to `asset_type`
+
+### 4.3 Handling of Missing and Invalid Data
+- **Generation and measurement readings**: records are expected every minute. Communication failures may cause missing minutes. The ETL process loads only the existing records; it does not fill gaps. The analytics layer may choose to interpolate or ignore missing data.
+- **Null measurements**: In the `measurement` table, columns `power_flow_mw` and `losses_mw` are null for substations; other columns may be null if the monitoring point does not measure that quantity. The Data Vault preserves nulls exactly as received.
+- **Dates/times**: all timestamps are in UTC. The ETL load does not perform time zone conversion.
+
+### 4.4 Slowly Changing Dimensions (SCD) and History
+- The OLTP **overwrites** master data (e.g., `operator_name`, `status`, `voltage_level_kv`). It does not maintain history on its own.
+- **However**, the Data Vault is designed to capture and preserve all historical changes: during each ETL load, the current OLTP values are compared with the latest satellite records. When a change is detected, the old satellite row is closed (by setting `end_date`) and a new row is inserted, thus building a full history that the source system lacks.
+- This SCD Type 2 mechanism ensures that the Galaxy dimensions can answer both "current state" and "as-of historical state" queries.
+- For event tables (`occurrence`, `work_order`), which may be updated (e.g., closing an occurrence), the Data Vault either overwrites the corresponding satellite attributes (SCD Type 1) or keeps additional satellites for audit, depending on the project's requirements.
+- **In summary:** the OLTP provides the current snapshot; the Data Vault creates and stores the complete change history needed for analytics.
+
+### 4.5 Data Volume and Growth
+- **Master data tables**: `plant` (~100 records), `substation` (~200), `transmission_line` (~500), `state` (~27) – very slow growth.
+- **Reading tables**: `generation_reading` (~144k rows/day), `measurement` (~1.44M rows/day) – linear growth with the number of monitoring points × minutes.
+- **Event tables**: `occurrence` (~100 events/day), `work_order` (~50 orders/day) – low daily volume, but cumulative.
+- **Relationship tables**: `occurrence_asset` (~120 rows/day), `work_order_asset` (~60 rows/day).
+- A partitioning strategy in the Data Vault and Galaxy (by month/year) will be employed to manage the large volume of readings.
+
+---
+
+## 5. Entity-Relationship Overview
+
+plant (1) ──────< (M) generation_reading
+
+transmission_line (1) ──< (M) measurement (asset_type = 'transmission_line')
+substation (1) ─────────< (M) measurement (asset_type = 'substation')
+
+occurrence (1) ──< (M) occurrence_asset >── (M) asset (plant / substation / transmission_line)
+occurrence (M) ── references ── (1) occurrence_type
+
+work_order (1) ──< (M) work_order_asset >── (M) asset (plant / substation / transmission_line)
+work_order (M) ── references ── (1) maintenance_type
+
+transmission_line (M) ── references ── (1) substation (origin)
+transmission_line (M) ── references ── (1) substation (destination)
+
+plant (M) ── references ── (1) state
+substation (M) ── references ── (1) state
+
+asset_status (independent snapshot table, references assets by asset_type + asset_id)
+
+
+**Notes:**
+- The polymorphic tables `measurement`, `occurrence_asset`, `work_order_asset` and `asset_status` use `asset_type` + `asset_id` to dynamically reference any asset type. This design is handled at the application/ETL layer; no database‑level FK constraints span multiple target tables.
+- The diagram shows logical dependencies; referential integrity for polymorphic relationships is enforced by the ETL code.
+
+---
+
+## 6. Source-to-Target Mapping (OLTP → Data Vault)
+
+| OLTP Table               | Target Hub/Link/Satellite(s)                                                                                           |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------|
+| plant                     | `hub_power_plant`, `sat_power_plant_attributes`, `sat_power_plant_status`, `link_power_plant_state`                    |
+| generation_reading        | `sat_gen_reading` (using `hub_power_plant` hash)                                                                       |
+| transmission_line         | `hub_transmission_line`, `sat_line_attributes`, `sat_line_status`, `link_transmission_line_substation` (2 rows: origin & destination) |
+| substation                | `hub_substation`, `sat_substation_attributes`, `sat_substation_status`, `link_substation_state`                        |
+| measurement               | `sat_substation_measurement` (for substation rows), `sat_line_measurement` (for line rows)                             |
+| occurrence                | `hub_occurrence`, `sat_occurrence_detail` (includes `hash_key_occurrence_type`)                                        |
+| occurrence_asset          | `link_occurrence_power_plant` / `link_occurrence_substation` / `link_occurrence_transmission_line` (depending on asset_type) |
+| occurrence_type           | `hub_occurrence_type`, `sat_occurrence_type_attributes`                                                                |
+| work_order                | `hub_work_order`, `sat_work_order_detail` (includes `hash_key_maintenance_type`)                                       |
+| work_order_asset          | `link_work_order_power_plant` / `link_work_order_substation` / `link_work_order_transmission_line`                     |
+| maintenance_type          | `hub_maintenance_type`, `sat_maintenance_type_attributes`                                                              |
+| asset_status              | `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot` (split by `asset_type`)    |
+| state                     | `hub_state`, `sat_state_attributes`                                                                                    |
+
+---
+
+## 7. Revision History
+
+| Version | Date       | Changes                                                                                              | Author           |
+|---------|------------|------------------------------------------------------------------------------------------------------|------------------|
+| 1.0     | 23/07/2026 | Initial creation                                                                                     | Guilherme Roriz  |
+| 1.1     | 24/07/2026 | Added `occurrence_type_id` FK to `occurrence`, `maintenance_type_id` FK to `work_order`; renamed `output_mw` to `generation_output_mw` and `available_capacity` to `available_capacity_mw`; renamed `grid_operator_area` to `ons_control_area`; removed all legacy "region" references; updated ER and ETL mapping | Guilherme Roriz  |
+
