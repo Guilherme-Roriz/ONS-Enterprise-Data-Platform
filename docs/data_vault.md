@@ -4,8 +4,8 @@
 **Layer:** Enterprise Data Warehouse (Data Vault)  
 **Data Source:** OLTP (PostgreSQL)  
 **Author:** Guilherme Roriz  
-**Date:** 24/07/2026  
-**Version:** 1.1
+**Date:** 27/07/2026  
+**Version:** 1.2
 
 ---
 
@@ -22,7 +22,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Convention        | Value / Rule                                                                 |
 |-------------------|------------------------------------------------------------------------------|
 | Hash algorithm    | SHA‑256, stored as CHAR(64) (hexadecimal)                                    |
-| Business key      | The column(s) that uniquely identify a business object in the source system (e.g., `plant_code`, `line_code`). Used to generate the hash key. |
+| Business key      | The column(s) that uniquely identify a business object in the source system (e.g., `plant_code`, `line_code`). Used to generate the hash key. Each Hub enforces a `UNIQUE` constraint on its business key column(s) as a safeguard against hash collisions or inconsistent source formatting. |
 | Hash key column   | `hash_key_<entity>` (e.g., `hash_key_power_plant`)                            |
 | Load date         | `load_date TIMESTAMP` – the moment the record was inserted into the Vault     |
 | Record source     | `record_source VARCHAR(50)` – identifies the source system (e.g., `'ONS_OLTP'`) |
@@ -32,7 +32,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Parent key        | The hash key of the parent Hub (for Satellites on Hubs) or the hash key of the parent Link (for Satellites on Links) |
 | Hash diff         | `hash_diff CHAR(64)` – SHA‑256 of all descriptive columns (for change detection)  |
 | End dating        | For SCD2 Satellites, `start_date` and `end_date` track validity                |
-| Load strategy     | Insert‑only; Satellites receive a new row when a hash diff change is detected  |
+| Load strategy     | Insert‑only; Satellites receive a new row when a hash diff change is detected. Satellites on static reference Hubs (`state`, `occurrence_type`, `maintenance_type`) are the sole exception and use SCD1 overwrite, since these are low-volume classification tables where historical versioning provides little analytical value. |
 
 ---
 
@@ -42,7 +42,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                  | Type     | Description                        |
 |-------------------------|----------|------------------------------------|
 | hash_key_power_plant    | CHAR(64) PK | SHA‑256(`plant_code`)             |
-| plant_code              | VARCHAR(20) | Business natural key               |
+| plant_code              | VARCHAR(20) UNIQUE | Business natural key         |
 | load_date               | TIMESTAMP   | First time seen in the Vault       |
 | record_source           | VARCHAR(50) | `'ONS_OLTP'`                       |
 
@@ -50,7 +50,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                      | Type     | Description                        |
 |-----------------------------|----------|------------------------------------|
 | hash_key_transmission_line  | CHAR(64) PK | SHA‑256(`line_code`)              |
-| line_code                   | VARCHAR(20) | Business natural key               |
+| line_code                   | VARCHAR(20) UNIQUE | Business natural key        |
 | load_date                   | TIMESTAMP   |                                    |
 | record_source               | VARCHAR(50) |                                    |
 
@@ -58,7 +58,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column              | Type     | Description                        |
 |---------------------|----------|------------------------------------|
 | hash_key_substation | CHAR(64) PK | SHA‑256(`substation_code`)        |
-| substation_code     | VARCHAR(20) | Business natural key               |
+| substation_code     | VARCHAR(20) UNIQUE | Business natural key         |
 | load_date           | TIMESTAMP   |                                    |
 | record_source       | VARCHAR(50) |                                    |
 
@@ -66,7 +66,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                 | Type     | Description                        |
 |------------------------|----------|------------------------------------|
 | hash_key_occurrence    | CHAR(64) PK | SHA‑256(`ticket_number`)          |
-| ticket_number          | VARCHAR(20) | Business natural key (event ID)   |
+| ticket_number          | VARCHAR(20) UNIQUE | Business natural key (event ID) |
 | load_date              | TIMESTAMP   |                                    |
 | record_source          | VARCHAR(50) |                                    |
 
@@ -74,7 +74,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                 | Type     | Description                        |
 |------------------------|----------|------------------------------------|
 | hash_key_work_order    | CHAR(64) PK | SHA‑256(`order_number`)          |
-| order_number           | VARCHAR(20) | Business natural key               |
+| order_number           | VARCHAR(20) UNIQUE | Business natural key         |
 | load_date              | TIMESTAMP   |                                    |
 | record_source          | VARCHAR(50) |                                    |
 
@@ -82,7 +82,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column          | Type     | Description                        |
 |-----------------|----------|------------------------------------|
 | hash_key_state  | CHAR(64) PK | SHA‑256(`state_code`)             |
-| state_code      | VARCHAR(10) | Business natural key (UF)          |
+| state_code      | VARCHAR(10) UNIQUE | Business natural key (UF)    |
 | load_date       | TIMESTAMP   |                                    |
 | record_source   | VARCHAR(50) |                                    |
 
@@ -90,7 +90,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                    | Type     | Description                        |
 |---------------------------|----------|------------------------------------|
 | hash_key_occurrence_type  | CHAR(64) PK | SHA‑256(`type_code`)             |
-| type_code                 | VARCHAR(10) | Business natural key               |
+| type_code                 | VARCHAR(10) UNIQUE | Business natural key         |
 | load_date                 | TIMESTAMP   |                                    |
 | record_source             | VARCHAR(50) |                                    |
 
@@ -98,7 +98,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 | Column                    | Type     | Description                        |
 |---------------------------|----------|------------------------------------|
 | hash_key_maintenance_type | CHAR(64) PK | SHA‑256(`type_code`)             |
-| type_code                 | VARCHAR(10) | Business natural key               |
+| type_code                 | VARCHAR(10) UNIQUE | Business natural key         |
 | load_date                 | TIMESTAMP   |                                    |
 | record_source             | VARCHAR(50) |                                    |
 
@@ -198,7 +198,7 @@ All structured data from the OLTP is ingested into the Raw Vault. The Data Lake 
 Captures descriptive attributes. SCD2 on `operator_name` and `installed_capacity_mw`.
 
 | Column                   | Type          | Description                              |
-|--------------------------|---------------|------------------------------------------|
+|--------------------------|---------------|-------------------------------------------|
 | hash_key_power_plant     | CHAR(64) FK   | References `hub_power_plant`             |
 | start_date               | DATE          | Validity start (inclusive)               |
 | end_date                 | DATE          | Validity end (exclusive, NULL = current) |
@@ -217,7 +217,7 @@ Captures descriptive attributes. SCD2 on `operator_name` and `installed_capacity
 Tracks the operational status independently. SCD2.
 
 | Column                | Type         | Description                              |
-|-----------------------|--------------|------------------------------------------|
+|-----------------------|--------------|--------------------------------------------|
 | hash_key_power_plant  | CHAR(64) FK  |                                          |
 | start_date            | DATE         | Validity start                            |
 | end_date              | DATE         | Validity end (NULL = current)             |
@@ -230,7 +230,7 @@ Tracks the operational status independently. SCD2.
 Periodic daily snapshot (from `asset_status` table). Insert‑only, no SCD2.
 
 | Column                | Type         | Description                              |
-|-----------------------|--------------|------------------------------------------|
+|-----------------------|--------------|--------------------------------------------|
 | hash_key_power_plant  | CHAR(64) FK  |                                          |
 | snapshot_date         | DATE         | Day of the snapshot                      |
 | availability_pct      | DECIMAL(5,2) |                                          |
@@ -246,7 +246,7 @@ Periodic daily snapshot (from `asset_status` table). Insert‑only, no SCD2.
 SCD2 on `voltage_level_kv`, and also contains static attributes and geographic coordinates.
 
 | Column                      | Type          | Description                              |
-|-----------------------------|---------------|------------------------------------------|
+|-----------------------------|---------------|--------------------------------------------|
 | hash_key_transmission_line  | CHAR(64) FK   |                                          |
 | start_date                  | DATE          | Validity start                            |
 | end_date                    | DATE          | Validity end (NULL = current)             |
@@ -270,7 +270,7 @@ SCD2 on `voltage_level_kv`, and also contains static attributes and geographic c
 Tracks operational status of the line. SCD2.
 
 | Column                      | Type         | Description                              |
-|-----------------------------|--------------|------------------------------------------|
+|-----------------------------|--------------|--------------------------------------------|
 | hash_key_transmission_line  | CHAR(64) FK  |                                          |
 | start_date                  | DATE         |                                          |
 | end_date                    | DATE         |                                          |
@@ -338,11 +338,13 @@ Daily snapshot (from `asset_status`).
 ### 5.4 Satellites on Hub – Occurrence
 
 #### 5.4.1 `sat_occurrence_detail`
-Stores mutable event data. For simplicity, SCD1 overwrite is used; historical audit may require a separate satellite.
+Stores mutable event data. **SCD2**: uses `start_date`/`end_date` to preserve full history of changes to an occurrence (e.g., resolution, updates to affected load or customer counts). The current state of an occurrence is the row where `end_date IS NULL`. This replaces the earlier "SCD1 overwrite, simplified" design from v1.1, adopted so that occurrence history is auditable without requiring a separate satellite.
 
 | Column                    | Type          | Description                              |
-|---------------------------|---------------|------------------------------------------|
-| hash_key_occurrence       | CHAR(64) FK   |                                          |
+|---------------------------|---------------|-------------------------------------------|
+| hash_key_occurrence       | CHAR(64) FK   | References `hub_occurrence`              |
+| start_date                | DATE          | Validity start (inclusive)               |
+| end_date                  | DATE          | Validity end (exclusive, NULL = current) |
 | hash_key_occurrence_type  | CHAR(64) FK   | References `hub_occurrence_type`         |
 | start_datetime            | TIMESTAMP     | Event start (from OLTP)                  |
 | end_datetime              | TIMESTAMP     | Event resolution (nullable if ongoing)   |
@@ -354,16 +356,18 @@ Stores mutable event data. For simplicity, SCD1 overwrite is used; historical au
 | load_date                 | TIMESTAMP     |                                          |
 | record_source             | VARCHAR(50)   |                                          |
 
-*Because occurrences may be updated, the ETL loads the latest state and closes the previous row only if full SCD2 is required. The hash_key_occurrence_type is taken from the OLTP FK via a lookup to `hub_occurrence_type`.*
+*Composite primary key: (hash_key_occurrence, start_date). On each ETL load, the current OLTP row for an occurrence is compared against the latest satellite row via `hash_diff`; on a change, the current row is closed (`end_date` set) and a new row is inserted, following the same pattern as the other SCD2 satellites in this document. The `hash_key_occurrence_type` is taken from the OLTP FK via a lookup to `hub_occurrence_type`.*
 
 ### 5.5 Satellites on Hub – Work Order
 
 #### 5.5.1 `sat_work_order_detail`
-Similar to occurrence; includes the reference to maintenance type.
+Stores mutable work order data. **SCD2**, following the same pattern as `sat_occurrence_detail`: `start_date`/`end_date` preserve the full change history of a work order (e.g., schedule changes, cost updates, completion). The current state is the row where `end_date IS NULL`.
 
 | Column                   | Type          | Description |
 |--------------------------|---------------|-------------|
-| hash_key_work_order      | CHAR(64) FK   |             |
+| hash_key_work_order      | CHAR(64) FK   | References `hub_work_order` |
+| start_date               | DATE          | Validity start (inclusive) |
+| end_date                 | DATE          | Validity end (exclusive, NULL = current) |
 | hash_key_maintenance_type| CHAR(64) FK   | References `hub_maintenance_type` |
 | scheduled_date           | DATE          |             |
 | planned_duration_hours   | DECIMAL(6,2)  |             |
@@ -375,10 +379,12 @@ Similar to occurrence; includes the reference to maintenance type.
 | load_date                | TIMESTAMP     |             |
 | record_source            | VARCHAR(50)   |             |
 
+*Composite primary key: (hash_key_work_order, start_date).*
+
 ### 5.6 Satellites on Hub – State
 
 #### 5.6.1 `sat_state_attributes`
-Static reference data (SCD1).
+Static reference data. **SCD1** (single row per hub key, overwritten in place) — reference/classification data where historical versioning is not required.
 
 | Column              | Type         | Description |
 |---------------------|--------------|-------------|
@@ -389,10 +395,12 @@ Static reference data (SCD1).
 | load_date           | TIMESTAMP    |             |
 | record_source       | VARCHAR(50)  |             |
 
+*Primary key: (hash_key_state).*
+
 ### 5.7 Satellites on Hub – Occurrence Type
 
 #### 5.7.1 `sat_occurrence_type_attributes`
-Reference data (SCD1).
+Reference data. **SCD1**.
 
 | Column                    | Type         | Description |
 |---------------------------|--------------|-------------|
@@ -404,10 +412,12 @@ Reference data (SCD1).
 | load_date                 | TIMESTAMP    |             |
 | record_source             | VARCHAR(50)  |             |
 
+*Primary key: (hash_key_occurrence_type).*
+
 ### 5.8 Satellites on Hub – Maintenance Type
 
 #### 5.8.1 `sat_maintenance_type_attributes`
-Reference data (SCD1).
+Reference data. **SCD1**.
 
 | Column                    | Type         | Description |
 |---------------------------|--------------|-------------|
@@ -419,6 +429,8 @@ Reference data (SCD1).
 | load_date                 | TIMESTAMP    |             |
 | record_source             | VARCHAR(50)  |             |
 
+*Primary key: (hash_key_maintenance_type).*
+
 ### 5.9 Raw Transaction Satellites (Insert‑Only)
 
 These satellites capture measurement/reading data without any update logic. They are the raw source for downstream analytics.
@@ -427,7 +439,7 @@ These satellites capture measurement/reading data without any update logic. They
 Linked to `hub_power_plant`.
 
 | Column                | Type          | Description                       |
-|-----------------------|---------------|-----------------------------------|
+|-----------------------|---------------|-------------------------------------|
 | hash_key_power_plant  | CHAR(64) FK   |                                   |
 | reading_timestamp     | TIMESTAMP     | UTC per‑minute                    |
 | generation_output_mw  | DECIMAL(10,2) |                                   |
@@ -441,7 +453,7 @@ Linked to `hub_power_plant`.
 Linked to `hub_substation`; receives rows from `measurement` where `asset_type = 'substation'`.
 
 | Column              | Type          | Description                     |
-|---------------------|---------------|---------------------------------|
+|---------------------|---------------|------------------------------------|
 | hash_key_substation | CHAR(64) FK   |                                 |
 | reading_timestamp   | TIMESTAMP     |                                 |
 | frequency_hz        | DECIMAL(6,2)  |                                 |
@@ -482,16 +494,16 @@ Linked to `hub_transmission_line`; receives rows from `measurement` where `asset
 | transmission_line         | `hub_transmission_line`, `sat_line_attributes`, `sat_line_status`, `link_transmission_line_substation` (2 rows: origin & destination) |
 | substation                | `hub_substation`, `sat_substation_attributes`, `sat_substation_status`, `link_substation_state`                        |
 | measurement               | `sat_substation_measurement` (for substation rows), `sat_line_measurement` (for line rows)                             |
-| occurrence                | `hub_occurrence`, `sat_occurrence_detail` (includes `hash_key_occurrence_type`)                                        |
+| occurrence                | `hub_occurrence`, `sat_occurrence_detail` (SCD2, includes `hash_key_occurrence_type`)                                  |
 | occurrence_asset          | `link_occurrence_power_plant` / `link_occurrence_substation` / `link_occurrence_transmission_line` (depending on asset_type) |
-| occurrence_type           | `hub_occurrence_type`, `sat_occurrence_type_attributes`                                                                |
-| work_order                | `hub_work_order`, `sat_work_order_detail` (includes `hash_key_maintenance_type`)                                       |
+| occurrence_type           | `hub_occurrence_type`, `sat_occurrence_type_attributes` (SCD1)                                                         |
+| work_order                | `hub_work_order`, `sat_work_order_detail` (SCD2, includes `hash_key_maintenance_type`)                                 |
 | work_order_asset          | `link_work_order_power_plant` / `link_work_order_substation` / `link_work_order_transmission_line`                     |
-| maintenance_type          | `hub_maintenance_type`, `sat_maintenance_type_attributes`                                                              |
+| maintenance_type          | `hub_maintenance_type`, `sat_maintenance_type_attributes` (SCD1)                                                       |
 | asset_status              | `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot` (split by `asset_type`)    |
-| state                     | `hub_state`, `sat_state_attributes`                                                                                    |
+| state                     | `hub_state`, `sat_state_attributes` (SCD1)                                                                             |
 
-All loads are incremental, using timestamps or CDC from the OLTP. Master data tables are compared via hash_diff to detect changes and generate new satellite rows with appropriate end‑dating.
+All loads are incremental, using timestamps or CDC from the OLTP. Master data and event tables are compared via `hash_diff` to detect changes: SCD2 satellites close the previous row (`end_date`) and insert a new one; SCD1 satellites overwrite the single existing row in place.
 
 ---
 
@@ -501,3 +513,4 @@ All loads are incremental, using timestamps or CDC from the OLTP. Master data ta
 |---------|------------|------------------------------------------------------------------------------------------------------|------------------|
 | 1.0     | 23/07/2026 | Initial Raw Data Vault design                                                                        | Guilherme Roriz  |
 | 1.1     | 24/07/2026 | Replaced polymorphic links with separate links per asset type; switched to SHA‑256 hashing; removed Galaxy‑specific consumption notes; removed `asset_age_years` from satellites; added `hash_key_occurrence_type` and `hash_key_maintenance_type` to respective satellites; renamed `link_line_substation` to `link_transmission_line_substation`; adjusted ETL mapping and added measurement split rationale | Guilherme Roriz  |
+| 1.2     | 27/07/2026 | Added `UNIQUE` constraint on all Hub business-key columns (design convention updated in Section 2); changed `sat_occurrence_detail` and `sat_work_order_detail` from "SCD1 overwrite (simplified)" to full **SCD2** with `start_date`/`end_date` and composite PK `(hash_key, start_date)`, to align design with DDL v1.2 and provide auditable history for both event types; clarified in Section 2 that `sat_state_attributes`, `sat_occurrence_type_attributes`, and `sat_maintenance_type_attributes` remain the only SCD1 (overwrite) satellites, as an explicit exception to the general insert-only/SCD2 convention | Guilherme Roriz  |
