@@ -4,8 +4,8 @@
 **Layer:** Galaxy Schema (Analytics)
 **Data Source:** Data Vault (Enterprise Data Warehouse)
 **Author:** Guilherme Roriz
-**Date:** 24/07/2026
-**Version:** 1.6
+**Date:** 27/07/2026
+**Version:** 1.7
 
 ---
 
@@ -65,12 +65,12 @@ BI Layer (Power BI, etc.)
 
 ### 1.3 Defined Granularities
 
-- **Power System Monitoring and Performance:** One record per measurement point per minute (point belongs to either a substation or a transmission line).
+- **Power System Monitoring and Performance:** One record per measurement point per minute (point belongs to either a substation or a transmission line). Enforced in the DDL via a unique grain index (`uq_fmon_grain`) on `(sk_date, sk_time_of_day, sk_substation, sk_transmission_line)`.
 - **Energy Generation:** One record per power plant per minute.
 - **Energy Transmission:** One record per transmission line per minute.
-- **Grid Occurrences:** One record per occurrence event. If an occurrence affects multiple assets, the event is repeated once per affected asset (each row corresponds to exactly one affected asset).
-- **Maintenance Monitoring:** One record per maintenance activity per asset.
-- **Asset Management:** One record per physical asset per day (status snapshot).
+- **Grid Occurrences:** One record per occurrence event. If an occurrence affects multiple assets, the event is repeated once per affected asset (each row corresponds to exactly one affected asset). Enforced via a unique grain index (`uq_focc_grain`) on `(occurrence_id, sk_power_plant, sk_substation, sk_transmission_line)`.
+- **Maintenance Monitoring:** One record per maintenance activity per asset. Enforced via a unique grain index (`uq_fmaint_grain`) on `(work_order_number, sk_power_plant, sk_substation, sk_transmission_line)`.
+- **Asset Management:** One record per physical asset per day (status snapshot). Enforced via a unique grain index (`uq_fasset_grain`) on `(sk_date, sk_power_plant, sk_substation, sk_transmission_line)`.
 
 ---
 
@@ -79,11 +79,13 @@ BI Layer (Power BI, etc.)
 | Business Process                           | DateTime | Power Plant | Substation | Transmission Line | State | Occurrence | Maintenance | Junk Flags |
 |---------------------------------------------|:--------:|:-----------:|:----------:|:------------------:|:-----:|:----------:|:-----------:|:----------:|
 | **Energy Generation**                       |    ✓     |      ✓      |            |                    |   ✓   |            |             |            |
-| **Energy Transmission**                     |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |            |
+| **Energy Transmission**                     |    ✓     |             |            |         ✓          |   ✓   |            |             |            |
 | **Grid Occurrences**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |     ✓      |             |     ✓      |
 | **Maintenance Monitoring**                  |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |     ✓       |     ✓      |
 | **Power System Monitoring and Performance** |    ✓     |             |     ✓      |         ✓          |   ✓   |            |             |            |
 | **Asset Management**                        |    ✓     |      ✓      |     ✓      |         ✓          |   ✓   |            |             |     ✓      |
+
+*Note: `Fact_Energy_Transmission` references only `Dim_Transmission_Line` for the asset dimension — there is no `sk_substation` on this fact. Substation removed from this row to match `fact_energy_transmission` in the Galaxy DDL.*
 
 ---
 
@@ -106,7 +108,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 
 ### 3.2 Conventions
 
-- **Surrogate Key (SK):** sequential integer, generated during load.
+- **Surrogate Key (SK):** sequential integer, generated during load. Facts with a nullable/polymorphic asset reference (`Fact_Power_System_Monitoring`, `Fact_Grid_Occurrence`, `Fact_Maintenance`, `Fact_Asset_Status`) use a dedicated identity surrogate key as the fact's own primary key (e.g., `sk_monitoring_id`), since a composite PK cannot combine nullable columns with a uniqueness guarantee. Grain uniqueness for these facts is instead enforced by a `UNIQUE` index over the grain columns, treating unmatched asset FKs as equal via `COALESCE(..., -1)`.
 - **Business Key (NK):** sourced from the Data Vault (hash_key).
 - **SCD:** Slowly Changing Dimension – Type 1 (overwrite), Type 2 (new row with start/end dates). A dimension is classified as **Type 2** overall; the document lists which attributes trigger a new row (Type 2) and which are overwritten in place (Type 1).
 - **Vault Source:** indicates which Data Vault table and column the data is extracted from. Names match the Data Vault Design Document exactly.
@@ -188,7 +190,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 **Type 1 overwrite attributes:** substation_name, substation_type, state_name.
 
 | Attribute            | Type     | Description                          | Vault Source                             |
-|----------------------|----------|--------------------------------------|------------------------------------------|
+|----------------------|----------|--------------------------------------|-------------------------------------------|
 | sk_substation        | INT PK   | Surrogate key                        | Generated                                |
 | hash_key_substation  | CHAR(64) | Business key                         | hub_substation.hash_key_substation        |
 | substation_name      | VARCHAR  | Substation name                      | sat_substation_attributes.substation_name |
@@ -207,9 +209,9 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 **Type 1 overwrite attributes:** all other descriptive attributes, including coordinates and names.
 
 | Attribute              | Type     | Description                              | Vault Source                                 |
-|------------------------|----------|------------------------------------------|----------------------------------------------|
+|------------------------|----------|--------------------------------------------|------------------------------------------------|
 | sk_transmission_line   | INT PK   | Surrogate key                            | Generated                                    |
-| hash_key_line          | CHAR(64) | Business key                             | hub_transmission_line.hash_key_transmission_line |
+| hash_key_transmission_line | CHAR(64) | Business key                         | hub_transmission_line.hash_key_transmission_line |
 | line_code              | VARCHAR  | Operational line code/name               | sat_line_attributes.line_code                |
 | voltage_level_kv       | DECIMAL  | Nominal voltage (Type 2)                 | sat_line_attributes.voltage_level_kv         |
 | length_km              | DECIMAL  | Line length                              | sat_line_attributes.length_km                |
@@ -228,12 +230,14 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 
 *Note: Dim_Transmission_Line does not include a direct state attribute because a line can span multiple states. State is derived from origin/destination substations when needed for facts.*
 
+*Note: `hash_key_line` was renamed to `hash_key_transmission_line` in Galaxy DDL v1.7 to match the naming convention used in the Data Vault Design Document exactly, per Section 3.2 conventions.*
+
 ### 4.6 Dim_State
 
 *(Formerly Dim_Region. Aligned with `hub_state` and `sat_state_attributes` in Data Vault.)*
 
 | Attribute          | Type     | Description                        | Vault Source                          |
-|--------------------|----------|------------------------------------|----------------------------------------|
+|--------------------|----------|--------------------------------------|-----------------------------------------|
 | sk_state           | INT PK   | Surrogate key                      | Generated                              |
 | hash_key_state     | CHAR(64) | Business key                       | hub_state.hash_key_state               |
 | state_code         | VARCHAR(10)| State abbreviation (UF)           | hub_state.state_code                   |
@@ -243,7 +247,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 4.7 Dim_Occurrence_Type
 
 | Attribute              | Type    | Description                             | Vault Source                            |
-|------------------------|---------|-----------------------------------------|------------------------------------------|
+|------------------------|---------|-------------------------------------------|--------------------------------------------|
 | sk_occurrence_type     | INT PK  | Surrogate key                          | Generated                                |
 | hash_key_occurrence_type| CHAR(64)| Business key                           | hub_occurrence_type.hash_key_occurrence_type |
 | occurrence_category    | VARCHAR | Outage / Equipment Failure / Alarm / Emergency | sat_occurrence_type_attributes.category |
@@ -253,7 +257,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 4.8 Dim_Maintenance_Type
 
 | Attribute              | Type    | Description                          | Vault Source                          |
-|------------------------|---------|--------------------------------------|----------------------------------------|
+|------------------------|---------|----------------------------------------|-----------------------------------------|
 | sk_maintenance_type    | INT PK  | Surrogate key                        | Generated                              |
 | hash_key_maintenance_type| CHAR(64)| Business key                        | hub_maintenance_type.hash_key_maintenance_type |
 | maintenance_category   | VARCHAR | Preventive / Corrective              | sat_maintenance_type_attributes.category |
@@ -265,7 +269,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 *Junk dimension replacing individual boolean flags on fact tables. Static, pre‑loaded with 27 rows.*
 
 | Attribute         | Type    | Description                                           | Vault Source / Rule                                                                                 |
-|-------------------|---------|-------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+|-------------------|---------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | sk_junk_flags     | INT PK  | Surrogate key                                         | Generated (pre‑loaded)                                                                              |
 | resolved_flag     | CHAR(3) | Occurrence resolved? `'Y'` / `'N'` / `'N/A'`           | `sat_occurrence_detail.resolved_flag` → `'Y'`/`'N'`; otherwise `'N/A'`                             |
 | overdue_flag      | CHAR(3) | Work order overdue? `'Y'` / `'N'` / `'N/A'`            | `sat_work_order_detail.overdue_flag` → `'Y'`/`'N'`; otherwise `'N/A'`                              |
@@ -278,7 +282,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 5.1 Fact_Energy_Generation
 
 | Attribute              | Type    | Description                       | Vault Source / Rule                          |
-|------------------------|---------|-----------------------------------|----------------------------------------------|
+|------------------------|---------|--------------------------------------|--------------------------------------------------|
 | sk_date                | INT FK  | Measurement date                  | dim_date.sk_date                             |
 | sk_time_of_day         | INT FK  | Measurement minute                | dim_time_of_day.sk_time_of_day               |
 | sk_power_plant         | INT FK  | Generating plant                  | dim_power_plant.sk_power_plant (valid at reading date) |
@@ -287,6 +291,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | available_capacity_mw  | DECIMAL | Capacity available at that minute | sat_gen_reading.available_capacity_mw         |
 | capacity_factor_pct    | DECIMAL | output / installed_capacity       | Calculated                                    |
 
+**Primary key:** `(sk_date, sk_time_of_day, sk_power_plant)`.
 **Granularity:** One row per power plant per minute.
 **Measure classification:**
 - Semi-additive: `generation_output_mw`, `available_capacity_mw`
@@ -296,7 +301,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 5.2 Fact_Energy_Transmission
 
 | Attribute              | Type    | Description                        | Vault Source / Rule                       |
-|------------------------|---------|------------------------------------|-------------------------------------------|
+|------------------------|---------|---------------------------------------|-------------------------------------------|
 | sk_date                | INT FK  | Measurement date                   | dim_date.sk_date                          |
 | sk_time_of_day         | INT FK  | Measurement minute                 | dim_time_of_day.sk_time_of_day            |
 | sk_transmission_line   | INT FK  | Transmission line                  | dim_transmission_line.sk_transmission_line (valid at reading date) |
@@ -305,6 +310,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | line_loading_pct       | DECIMAL | flow / thermal_limit               | Calculated                                 |
 | losses_mw              | DECIMAL | Transmission losses (instantaneous)| sat_line_measurement.losses_mw             |
 
+**Primary key:** `(sk_date, sk_time_of_day, sk_transmission_line)`. There is no `sk_substation` on this fact — see note in Section 2.
 **Granularity:** One row per transmission line per minute.
 **Measure classification:**
 - Semi-additive: `power_flow_mw`, `losses_mw`
@@ -313,7 +319,8 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 5.3 Fact_Power_System_Monitoring
 
 | Attribute              | Type    | Description                        | Vault Source / Rule                       |
-|------------------------|---------|------------------------------------|-------------------------------------------|
+|------------------------|---------|---------------------------------------|-------------------------------------------|
+| sk_monitoring_id       | BIGINT PK | Surrogate key (identity)          | Generated                                  |
 | sk_date                | INT FK  | Measurement date                   | dim_date.sk_date                          |
 | sk_time_of_day         | INT FK  | Measurement minute                 | dim_time_of_day.sk_time_of_day            |
 | sk_substation          | INT FK  | Monitoring point (substation) – nullable | dim_substation.sk_substation           |
@@ -324,9 +331,10 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | reliability_index      | DECIMAL | Composite reliability score        | sat_substation_measurement.reliability_index (only for substations) |
 | system_load_mw         | DECIMAL | Instantaneous system load          | sat_substation_measurement.system_load_mw (only for substations) |
 
-**Granularity:** One row per measurement point per minute.  
-**Constraint:** Exactly one of `sk_substation` or `sk_transmission_line` must be non-null.
-
+**Primary key:** `sk_monitoring_id` (surrogate identity). A composite key on the natural grain is not usable because `sk_substation`/`sk_transmission_line` are mutually nullable.
+**Constraint:** `chk_one_asset` — exactly one of `sk_substation` or `sk_transmission_line` must be non-null.
+**Grain uniqueness:** enforced by `UNIQUE INDEX uq_fmon_grain` on `(sk_date, sk_time_of_day, COALESCE(sk_substation,-1), COALESCE(sk_transmission_line,-1))`, guaranteeing one row per monitoring point per minute.
+**Granularity:** One row per measurement point per minute.
 **Measure classification:**
 - Semi-additive: `system_load_mw`
 - Non-additive: `frequency_hz`, `voltage_kv`, `reliability_index`
@@ -334,7 +342,8 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 5.4 Fact_Grid_Occurrence
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|------------------------|---------|--------------------------------------|----------------------------------------------|
+|------------------------|---------|-----------------------------------------|----------------------------------------------|
+| sk_occurrence_fact     | BIGINT PK | Surrogate key (identity)             | Generated                                    |
 | occurrence_id          | VARCHAR | Degenerate dimension – ticket number | hub_occurrence.ticket_number                 |
 | sk_date                | INT FK  | Event start date                     | dim_date.sk_date                             |
 | sk_time_of_day         | INT FK  | Event start time                     | dim_time_of_day.sk_time_of_day               |
@@ -348,14 +357,18 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | affected_load_mw       | DECIMAL | Load impacted                        | sat_occurrence_detail.affected_load_mw        |
 | customers_affected     | INT     | Customers impacted                   | sat_occurrence_detail.customers_affected      |
 
-**Granularity:** One row per occurrence event per affected asset.  
+**Primary key:** `sk_occurrence_fact` (surrogate identity), allowing the same `occurrence_id` to repeat once per affected asset without violating uniqueness.
+**Constraint:** `chk_one_occ_asset` — exactly one of `sk_power_plant`, `sk_substation`, `sk_transmission_line` must be non-null per row.
+**Grain uniqueness:** enforced by `UNIQUE INDEX uq_focc_grain` on `(occurrence_id, COALESCE(sk_power_plant,-1), COALESCE(sk_substation,-1), COALESCE(sk_transmission_line,-1))`.
+**Granularity:** One row per occurrence event per affected asset.
 **Measure classification:**
 - Additive: `duration_minutes`, `affected_load_mw`, `customers_affected`
 
 ### 5.5 Fact_Maintenance
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|------------------------|---------|--------------------------------------|----------------------------------------------|
+|------------------------|---------|-----------------------------------------|----------------------------------------------|
+| sk_maintenance_fact    | BIGINT PK | Surrogate key (identity)             | Generated                                    |
 | work_order_number      | VARCHAR | Degenerate dimension – order number  | hub_work_order.order_number                  |
 | sk_date                | INT FK  | Scheduled/executed date              | dim_date.sk_date                             |
 | sk_power_plant         | INT FK  | Asset under maintenance (nullable)   | link_work_order_power_plant → dim_power_plant |
@@ -369,7 +382,10 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | cost                   | DECIMAL | Maintenance cost                     | sat_work_order_detail.cost                   |
 | asset_availability_pct | DECIMAL | Asset availability during the period | sat_work_order_detail.asset_availability_pct   |
 
-**Granularity:** One row per maintenance activity per asset.  
+**Primary key:** `sk_maintenance_fact` (surrogate identity), allowing the same `work_order_number` to repeat once per affected asset without violating uniqueness.
+**Constraint:** `chk_one_maint_asset` — exactly one of `sk_power_plant`, `sk_substation`, `sk_transmission_line` must be non-null per row.
+**Grain uniqueness:** enforced by `UNIQUE INDEX uq_fmaint_grain` on `(work_order_number, COALESCE(sk_power_plant,-1), COALESCE(sk_substation,-1), COALESCE(sk_transmission_line,-1))`.
+**Granularity:** One row per maintenance activity per asset.
 **Measure classification:**
 - Additive: `planned_duration_hours`, `actual_duration_hours`, `cost`
 - Semi-additive: `asset_availability_pct`
@@ -377,7 +393,8 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 ### 5.6 Fact_Asset_Status
 
 | Attribute              | Type    | Description                          | Vault Source / Rule                          |
-|------------------------|---------|--------------------------------------|----------------------------------------------|
+|------------------------|---------|-----------------------------------------|----------------------------------------------|
+| sk_asset_status_id     | BIGINT PK | Surrogate key (identity)             | Generated                                    |
 | sk_date                | INT FK  | Snapshot date                        | dim_date.sk_date                             |
 | sk_power_plant         | INT FK  | Asset (nullable)                     | dim_power_plant.sk_power_plant (valid at snapshot) |
 | sk_substation          | INT FK  | Asset (nullable)                     | dim_substation.sk_substation                |
@@ -387,7 +404,10 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | availability_pct       | DECIMAL | % of the day the asset was available | sat_*_daily_snapshot.availability_pct        |
 | asset_age_years        | DECIMAL | Age since commissioning              | Calculated in ETL (snapshot_date − commissioning_date from dimension) |
 
-**Granularity:** One row per physical asset per day. Exactly one asset FK is non-null.  
+**Primary key:** `sk_asset_status_id` (surrogate identity).
+**Constraint:** `chk_one_asset_status` — exactly one of `sk_power_plant`, `sk_substation`, `sk_transmission_line` must be non-null per row.
+**Grain uniqueness:** enforced by `UNIQUE INDEX uq_fasset_grain` on `(sk_date, COALESCE(sk_power_plant,-1), COALESCE(sk_substation,-1), COALESCE(sk_transmission_line,-1))`.
+**Granularity:** One row per physical asset per day. Exactly one asset FK is non-null.
 **Measure classification:**
 - Semi-additive: `availability_pct`
 - Non-additive: `asset_age_years`
@@ -406,12 +426,13 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | Degenerate Dimension  | Transactional identifier stored directly on the fact table                                   | Data       |
 | Junk Dimension        | Dimension combining low‑cardinality flags/indicators to simplify fact tables                 | Data       |
 | Galaxy Schema         | A dimensional model with multiple fact tables sharing conformed dimensions                   | Data       |
+| Grain Unique Index    | A `UNIQUE INDEX` (rather than the PK) used to enforce one-row-per-grain when the fact's own PK is a surrogate key decoupled from the business grain | Data |
 
 ---
 
 ## 7. Performance and Security
 
-- **Indexes:** B-tree on all foreign keys in fact tables; bitmap indexes on frequently filtered dimension columns (e.g., `state_name`, `status`).
+- **Indexes:** B-tree on all foreign keys in fact tables; bitmap indexes on frequently filtered dimension columns (e.g., `state_name`, `status`); `UNIQUE` grain indexes on `fact_power_system_monitoring`, `fact_grid_occurrence`, `fact_maintenance`, and `fact_asset_status` (see Section 5) to guarantee idempotent ETL loads despite their surrogate primary keys.
 - **Partitioning:** partition fact tables by `sk_date` (year-month).
 - **Aggregations:** consider daily/monthly aggregates for common dashboards.
 - **Row-Level Security (RLS):** optional filters on `dim_state` to restrict data by operational area.
@@ -429,3 +450,4 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | 1.4     | 07/23/2026 | Review pass, aligned Vault Source names, fixed column names, degenerate dimensions from business keys                        | Guilherme Roriz  |
 | 1.5     | 07/24/2026 | Introduced Dim_Junk_Flags, adjusted affected facts, added Junk Flags to bus matrix                                           | Guilherme Roriz  |
 | 1.6     | 07/24/2026 | Overhauled SCD documentation (dimension‑level Type 2 with attribute classification); enhanced Dim_Date and Dim_Time_of_Day with enterprise attributes; renamed `grid_operator_area` to `ons_control_area`; removed any remaining `region` references; added architecture overview diagram | Guilherme Roriz  |
+| 1.7     | 27/07/2026 | Renamed `hash_key_line` to `hash_key_transmission_line` in Dim_Transmission_Line (Section 4.5) to align with Data Vault naming; removed erroneous Substation checkmark from Fact_Energy_Transmission row in the Bus Matrix (Section 2); switched `Fact_Power_System_Monitoring`, `Fact_Grid_Occurrence`, `Fact_Maintenance`, and `Fact_Asset_Status` from composite natural-key PKs to surrogate identity PKs plus `UNIQUE` grain indexes, since a composite PK cannot enforce uniqueness across mutually-nullable asset FKs; documented the grain indexes in Section 1.3, Section 3.2 (new convention), each affected fact table in Section 5, and Section 7 | Guilherme Roriz  |
