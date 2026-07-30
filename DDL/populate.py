@@ -17,13 +17,7 @@ from faker import Faker
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
-DB_PARAMS = {
-    "dbname": "ons_oltp",
-    "user": "postgres",
-    "password": "postgres",        # change if necessary
-    "host": "localhost",
-    "port": 5432,
-}
+DB_PARAMS = {}
 
 SEED = 42
 random.seed(SEED)
