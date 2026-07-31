@@ -76,12 +76,12 @@ etl/
 Create a `.env` file in the project root with your PostgreSQL credentials:
 
 ```
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=ons_edp
-DB_USER=etl_user
-DB_PASSWORD=strongpassword
-LOG_LEVEL=INFO
+DB_HOST= ------
+DB_PORT= -----
+DB_NAME= -----
+DB_USER= ----
+DB_PASSWORD= ------
+LOG_LEVEL= ----
 ```
 
 These values are read by `python-dotenv` in `database.py`. No credentials are stored in the source code.
