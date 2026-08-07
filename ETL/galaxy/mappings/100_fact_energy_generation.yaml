@@ -1,0 +1,5 @@
+pipeline: fact_energy_generation
+order: 100
+source: data_vault.sat_gen_reading
+target: galaxy.fact_energy_generation
+sql_file: fact_energy_generation.sql

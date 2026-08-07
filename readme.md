@@ -34,10 +34,26 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - Dimensional modeling
 - Business-oriented analytical datasets
 - End-to-end project documentation
+- Configuration-driven OLTP → Data Vault ingestion
+- Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
 
 ## Documentation
 
 Detailed technical documentation, architecture diagrams, data models, and implementation decisions are available in the **`/docs`** directory.
+
+ETL operating guides:
+
+- [`ETL/1ETL.md`](ETL/1ETL.md) — OLTP → Data Vault
+- [`ETL/2ETL.md`](ETL/2ETL.md) — Data Vault → Galaxy
+
+Install the Python dependencies with `pip install -r requirements.txt` and copy `.env.example` to `.env`.
+
+Run the ETL stages independently:
+
+```bash
+python -m ETL.data_vault.main
+python -m ETL.galaxy.main
+```
 
 ## Project Status
 

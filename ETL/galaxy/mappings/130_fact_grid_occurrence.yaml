@@ -1,0 +1,5 @@
+pipeline: fact_grid_occurrence
+order: 130
+source: data_vault.hub_occurrence,data_vault.sat_occurrence_detail,data_vault.link_occurrence_*
+target: galaxy.fact_grid_occurrence
+sql_file: fact_grid_occurrence.sql

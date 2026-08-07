@@ -1,0 +1,5 @@
+pipeline: fact_energy_transmission
+order: 110
+source: data_vault.sat_line_measurement
+target: galaxy.fact_energy_transmission
+sql_file: fact_energy_transmission.sql

@@ -1,0 +1,5 @@
+pipeline: dim_substation
+order: 70
+source: data_vault.sat_substation_*,data_vault.link_substation_state
+target: galaxy.dim_substation
+sql_file: dim_substation.sql

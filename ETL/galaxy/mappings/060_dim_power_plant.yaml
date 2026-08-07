@@ -1,0 +1,5 @@
+pipeline: dim_power_plant
+order: 60
+source: data_vault.sat_power_plant_*,data_vault.link_power_plant_state
+target: galaxy.dim_power_plant
+sql_file: dim_power_plant.sql

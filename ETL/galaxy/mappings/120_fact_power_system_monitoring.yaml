@@ -1,0 +1,5 @@
+pipeline: fact_power_system_monitoring
+order: 120
+source: data_vault.sat_substation_measurement,data_vault.sat_line_measurement
+target: galaxy.fact_power_system_monitoring
+sql_file: fact_power_system_monitoring.sql

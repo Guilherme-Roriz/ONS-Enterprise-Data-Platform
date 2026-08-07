@@ -1,0 +1,5 @@
+pipeline: fact_maintenance
+order: 140
+source: data_vault.hub_work_order,data_vault.sat_work_order_detail,data_vault.link_work_order_*
+target: galaxy.fact_maintenance
+sql_file: fact_maintenance.sql
