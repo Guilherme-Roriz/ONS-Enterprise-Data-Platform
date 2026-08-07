@@ -1,0 +1,5 @@
+pipeline: dim_state
+order: 30
+source: data_vault.hub_state,data_vault.sat_state_attributes
+target: galaxy.dim_state
+sql_file: dim_state.sql

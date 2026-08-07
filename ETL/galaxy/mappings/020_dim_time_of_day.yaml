@@ -1,0 +1,5 @@
+pipeline: dim_time_of_day
+order: 20
+source: generated_minutes
+target: galaxy.dim_time_of_day
+sql_file: dim_time_of_day.sql

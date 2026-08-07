@@ -1,0 +1,13 @@
+source_table: oltp.vw_state
+hub_table: vault.hub_state
+satellite_table: vault.sat_state
+business_key: state_code
+incremental_column: state_id
+load_date_column: load_datetime
+hash_columns:
+  - state_name
+  - ons_control_area
+hub_hash_key_column: hash_key_state
+hub_business_key_column: state_code
+satellite_hashdiff_column: hash_diff
+satellite_hub_key_column: hash_key_state

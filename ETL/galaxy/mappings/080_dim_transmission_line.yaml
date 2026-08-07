@@ -1,0 +1,5 @@
+pipeline: dim_transmission_line
+order: 80
+source: data_vault.sat_line_*,data_vault.link_transmission_line_substation
+target: galaxy.dim_transmission_line
+sql_file: dim_transmission_line.sql

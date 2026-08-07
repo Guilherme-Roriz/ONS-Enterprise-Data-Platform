@@ -1,0 +1,5 @@
+pipeline: dim_occurrence_type
+order: 40
+source: data_vault.hub_occurrence_type,data_vault.sat_occurrence_type_attributes
+target: galaxy.dim_occurrence_type
+sql_file: dim_occurrence_type.sql

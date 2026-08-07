@@ -1,7 +1,7 @@
 -- ============================================================
 -- ONS Enterprise Data Platform – Galaxy Schema DDL
 -- Schema: galaxy (Star Schema / Kimball)
--- Version: 1.7 (final with grain uniqueness)
+-- Version: 1.8 (ETL upsert keys and percentage precision)
 -- ============================================================
 
 CREATE SCHEMA IF NOT EXISTS galaxy;
@@ -139,7 +139,8 @@ SELECT
 FROM
     (VALUES ('Y'),('N'),('N/A')) AS r(flag)
     CROSS JOIN (VALUES ('Y'),('N'),('N/A')) AS o(flag)
-    CROSS JOIN (VALUES ('Y'),('N'),('N/A')) AS i(flag);
+    CROSS JOIN (VALUES ('Y'),('N'),('N/A')) AS i(flag)
+ON CONFLICT (sk_junk_flags) DO NOTHING;
 
 -- ============================================================
 -- 5. Fact Tables
@@ -153,7 +154,7 @@ CREATE TABLE fact_energy_generation (
     sk_state             INT REFERENCES dim_state(sk_state),
     generation_output_mw DECIMAL(10,2) NOT NULL,
     available_capacity_mw DECIMAL(10,2) NOT NULL,
-    capacity_factor_pct  DECIMAL(6,4),
+    capacity_factor_pct  DECIMAL(7,4),
     PRIMARY KEY (sk_date, sk_time_of_day, sk_power_plant)
 );
 
@@ -164,7 +165,7 @@ CREATE TABLE fact_energy_transmission (
     sk_transmission_line INT NOT NULL REFERENCES dim_transmission_line(sk_transmission_line),
     sk_state             INT REFERENCES dim_state(sk_state),
     power_flow_mw        DECIMAL(10,2),
-    line_loading_pct     DECIMAL(6,4),
+    line_loading_pct     DECIMAL(7,4),
     losses_mw            DECIMAL(10,2),
     PRIMARY KEY (sk_date, sk_time_of_day, sk_transmission_line)
 );
@@ -288,6 +289,18 @@ CREATE UNIQUE INDEX uq_fasset_grain
 -- ============================================================
 -- 6. Performance indexes
 -- ============================================================
+CREATE UNIQUE INDEX uq_dim_state_hash ON dim_state (hash_key_state);
+CREATE UNIQUE INDEX uq_dim_power_plant_version
+    ON dim_power_plant (hash_key_power_plant, start_date);
+CREATE UNIQUE INDEX uq_dim_substation_version
+    ON dim_substation (hash_key_substation, start_date);
+CREATE UNIQUE INDEX uq_dim_transmission_line_version
+    ON dim_transmission_line (hash_key_transmission_line, start_date);
+CREATE UNIQUE INDEX uq_dim_occurrence_type_hash
+    ON dim_occurrence_type (hash_key_occurrence_type);
+CREATE UNIQUE INDEX uq_dim_maintenance_type_hash
+    ON dim_maintenance_type (hash_key_maintenance_type);
+
 CREATE INDEX idx_fgen_plant ON fact_energy_generation (sk_power_plant);
 CREATE INDEX idx_fgen_state ON fact_energy_generation (sk_state);
 CREATE INDEX idx_ftrans_line ON fact_energy_transmission (sk_transmission_line);

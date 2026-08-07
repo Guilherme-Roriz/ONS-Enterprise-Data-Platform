@@ -4,8 +4,8 @@
 **Layer:** Galaxy Schema (Analytics)
 **Data Source:** Data Vault (Enterprise Data Warehouse)
 **Author:** Guilherme Roriz
-**Date:** 27/07/2026
-**Version:** 1.7
+**Date:** 07/08/2026
+**Version:** 1.8
 
 ---
 
@@ -307,7 +307,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | sk_transmission_line   | INT FK  | Transmission line                  | dim_transmission_line.sk_transmission_line (valid at reading date) |
 | sk_state               | INT FK  | State (derived from origin substation or dominant state) | dim_state.sk_state (via ETL) |
 | power_flow_mw          | DECIMAL | Active power flow (instantaneous)  | sat_line_measurement.power_flow_mw        |
-| line_loading_pct       | DECIMAL | flow / thermal_limit               | Calculated                                 |
+| line_loading_pct       | DECIMAL | flow / thermal_limit               | Calculated when a line thermal limit is available; currently NULL because the source and Vault do not contain one |
 | losses_mw              | DECIMAL | Transmission losses (instantaneous)| sat_line_measurement.losses_mw             |
 
 **Primary key:** `(sk_date, sk_time_of_day, sk_transmission_line)`. There is no `sk_substation` on this fact — see note in Section 2.
@@ -402,7 +402,7 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | sk_state               | INT FK  | State of the asset                   | dim_state.sk_state (derived from asset)      |
 | sk_junk_flags          | INT FK  | Junk dimension for flags             | dim_junk_flags.sk_junk_flags (in_operation_flag = 'Y'/'N', others 'N/A') |
 | availability_pct       | DECIMAL | % of the day the asset was available | sat_*_daily_snapshot.availability_pct        |
-| asset_age_years        | DECIMAL | Age since commissioning              | Calculated in ETL (snapshot_date − commissioning_date from dimension) |
+| asset_age_years        | DECIMAL | Age since commissioning              | Calculated for plants; NULL for substations and lines until their commissioning dates are modeled |
 
 **Primary key:** `sk_asset_status_id` (surrogate identity).
 **Constraint:** `chk_one_asset_status` — exactly one of `sk_power_plant`, `sk_substation`, `sk_transmission_line` must be non-null per row.
@@ -451,3 +451,4 @@ Power Plant, Substation and Transmission Line are the three "physical asset" dim
 | 1.5     | 07/24/2026 | Introduced Dim_Junk_Flags, adjusted affected facts, added Junk Flags to bus matrix                                           | Guilherme Roriz  |
 | 1.6     | 07/24/2026 | Overhauled SCD documentation (dimension‑level Type 2 with attribute classification); enhanced Dim_Date and Dim_Time_of_Day with enterprise attributes; renamed `grid_operator_area` to `ons_control_area`; removed any remaining `region` references; added architecture overview diagram | Guilherme Roriz  |
 | 1.7     | 27/07/2026 | Renamed `hash_key_line` to `hash_key_transmission_line` in Dim_Transmission_Line (Section 4.5) to align with Data Vault naming; removed erroneous Substation checkmark from Fact_Energy_Transmission row in the Bus Matrix (Section 2); switched `Fact_Power_System_Monitoring`, `Fact_Grid_Occurrence`, `Fact_Maintenance`, and `Fact_Asset_Status` from composite natural-key PKs to surrogate identity PKs plus `UNIQUE` grain indexes, since a composite PK cannot enforce uniqueness across mutually-nullable asset FKs; documented the grain indexes in Section 1.3, Section 3.2 (new convention), each affected fact table in Section 5, and Section 7 | Guilherme Roriz  |
+| 1.8     | 07/08/2026 | Added Data Vault → Galaxy ETL rules, documented source limitations for line loading and non-plant asset age, and aligned dimensional upsert keys and percentage precision with the executable pipeline | Guilherme Roriz  |

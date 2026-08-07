@@ -46,27 +46,23 @@ Key design principles:
 
 ### 3. Directory Structure
 
-```
-etl/
+```text
+ETL/
+├── common/
+│   └── control.py             # Audit/control table shared by both ETLs
 ├── config/
-│   └── database.py          # Database connection via .env
-├── core/
-│   ├── engine.py             # Generic ingestion engine
-│   ├── hub_loader.py         # Hub loading logic
-│   ├── satellite_loader.py   # Satellite loading logic
-│   ├── link_loader.py        # Link loading logic
-│   └── control.py            # ETL control table management
-├── mappings/                 # One YAML file per entity
-│   ├── plants.yaml
-│   ├── generation.yaml
-│   ├── substations.yaml
-│   └── ...
-├── utils/
-│   ├── logger.py             # Centralized logging configuration
-│   └── hash.py               # SHA‑256 hash generation
-├── logs/
-│   └── etl.log               # Application log file
-└── main.py                   # Entry point
+│   └── database.py            # Shared database connection via .env
+├── data_vault/
+│   ├── core/
+│   │   ├── engine.py          # Generic ingestion engine
+│   │   ├── hub_loader.py      # Hub loading logic
+│   │   ├── satellite_loader.py # Satellite loading logic
+│   │   └── link_loader.py     # Link loading logic
+│   ├── mappings/              # One YAML file per source entity
+│   └── main.py                # OLTP → Data Vault entry point
+└── utils/
+    ├── logger.py              # Shared logging configuration
+    └── hash.py                # SHA‑256 hash generation
 ```
 
 ---
@@ -90,7 +86,7 @@ These values are read by `python-dotenv` in `database.py`. No credentials are st
 
 ### 5. Mapping Files (YAML)
 
-Each entity to be loaded has a dedicated YAML file inside `etl/mappings/`. The filename (without extension) becomes the pipeline name used in logs and the control table.
+Each entity to be loaded has a dedicated YAML file inside `ETL/data_vault/mappings/`. The filename (without extension) becomes the pipeline name used in logs and the control table.
 
 #### 5.1 Basic Structure
 
@@ -268,10 +264,10 @@ All exceptions are logged with a full stack trace.
 pip install pandas sqlalchemy psycopg2-binary python-dotenv pyyaml
 
 # Execute
-python -m etl.main
+python -m ETL.data_vault.main
 ```
 
-Ensure the `.env` file is in the project root and that the OLTP and Vault tables already exist in the database.
+Ensure the `.env` file is in the project root and that the `oltp`, `data_vault`, and `etl` schemas already exist in the database.
 
 ---
 
@@ -279,9 +275,9 @@ Ensure the `.env` file is in the project root and that the OLTP and Vault tables
 
 To add a new entity (e.g., `ocurrences`):
 
-1. Create `etl/mappings/ocurrences.yaml` following the standard format.
+1. Create `ETL/data_vault/mappings/occurrences.yaml` following the standard format.
 2. Define the Hub, Satellite, and optional Links.
-3. Run `python -m etl.main` again. The new pipeline is detected automatically.
+3. Run `python -m ETL.data_vault.main` again. The new pipeline is detected automatically.
 
 **No code changes are required.**
 
@@ -291,7 +287,7 @@ To add a new entity (e.g., `ocurrences`):
 
 - Python ≥ 3.13
 - Packages: `pandas`, `SQLAlchemy`, `psycopg2-binary` (or `psycopg`), `python-dotenv`, `PyYAML`
-- PostgreSQL database with `oltp`, `vault`, and `etl` schemas already created
+- PostgreSQL database with `oltp`, `data_vault`, and `etl` schemas already created
 
 ---
 

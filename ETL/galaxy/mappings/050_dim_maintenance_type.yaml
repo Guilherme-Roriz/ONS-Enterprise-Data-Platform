@@ -1,0 +1,5 @@
+pipeline: dim_maintenance_type
+order: 50
+source: data_vault.hub_maintenance_type,data_vault.sat_maintenance_type_attributes
+target: galaxy.dim_maintenance_type
+sql_file: dim_maintenance_type.sql

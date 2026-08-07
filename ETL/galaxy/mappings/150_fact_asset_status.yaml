@@ -1,0 +1,5 @@
+pipeline: fact_asset_status
+order: 150
+source: data_vault.sat_*_daily_snapshot
+target: galaxy.fact_asset_status
+sql_file: fact_asset_status.sql

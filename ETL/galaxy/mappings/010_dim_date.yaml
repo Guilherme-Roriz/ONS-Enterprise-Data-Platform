@@ -1,0 +1,5 @@
+pipeline: dim_date
+order: 10
+source: data_vault.*
+target: galaxy.dim_date
+sql_file: dim_date.sql
