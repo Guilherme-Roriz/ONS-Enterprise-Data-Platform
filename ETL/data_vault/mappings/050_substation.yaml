@@ -1,0 +1,9 @@
+pipeline: substation
+order: 50
+source: oltp.substation
+targets:
+  - data_vault.hub_substation
+  - data_vault.sat_substation_attributes
+  - data_vault.sat_substation_status
+  - data_vault.link_substation_state
+sql_file: substation.sql

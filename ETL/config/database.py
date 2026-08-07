@@ -9,7 +9,6 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # An explicit ENV_FILE wins. Otherwise use the conventional project-root .env.
@@ -23,10 +22,10 @@ def get_database_url() -> str:
     if explicit_url:
         return explicit_url
 
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    database = os.getenv("DB_NAME", "ons_edp")
-    user = os.getenv("DB_USER", "etl_user")
+    host = os.getenv("DB_HOST") or "localhost"
+    port = os.getenv("DB_PORT") or "5432"
+    database = os.getenv("DB_NAME") or "ons_edp"
+    user = os.getenv("DB_USER") or "etl_user"
     password = quote_plus(os.getenv("DB_PASSWORD", ""))
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 

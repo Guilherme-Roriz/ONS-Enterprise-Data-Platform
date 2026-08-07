@@ -1,0 +1,7 @@
+pipeline: state
+order: 10
+source: oltp.state
+targets:
+  - data_vault.hub_state
+  - data_vault.sat_state_attributes
+sql_file: state.sql

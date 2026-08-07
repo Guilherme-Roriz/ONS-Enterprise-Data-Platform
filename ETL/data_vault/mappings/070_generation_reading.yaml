@@ -1,0 +1,6 @@
+pipeline: generation_reading
+order: 70
+source: oltp.generation_reading
+targets:
+  - data_vault.sat_gen_reading
+sql_file: generation_reading.sql

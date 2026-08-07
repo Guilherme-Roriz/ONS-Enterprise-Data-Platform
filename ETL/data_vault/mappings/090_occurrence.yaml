@@ -1,0 +1,7 @@
+pipeline: occurrence
+order: 90
+source: oltp.occurrence
+targets:
+  - data_vault.hub_occurrence
+  - data_vault.sat_occurrence_detail
+sql_file: occurrence.sql

@@ -1,6 +1,7 @@
 """
 Entry point for the ONS Enterprise Data Platform ETL.
 """
+
 import logging
 import sys
 
@@ -8,7 +9,8 @@ from ETL.config.database import get_engine
 from ETL.data_vault.core.engine import ETLIngestionEngine
 from ETL.utils.logger import setup_logging
 
-def main():
+
+def main() -> int:
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting ONS ETL")
@@ -19,10 +21,11 @@ def main():
         etl_engine.run()
     except Exception:
         logger.exception("ETL execution aborted with a fatal error")
-        sys.exit(1)
+        return 1
     else:
         logger.info("ETL finished successfully")
-        sys.exit(0)
+        return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

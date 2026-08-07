@@ -1,0 +1,8 @@
+pipeline: asset_status
+order: 130
+source: oltp.asset_status
+targets:
+  - data_vault.sat_power_plant_daily_snapshot
+  - data_vault.sat_substation_daily_snapshot
+  - data_vault.sat_line_daily_snapshot
+sql_file: asset_status.sql

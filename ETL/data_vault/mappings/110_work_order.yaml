@@ -1,0 +1,7 @@
+pipeline: work_order
+order: 110
+source: oltp.work_order
+targets:
+  - data_vault.hub_work_order
+  - data_vault.sat_work_order_detail
+sql_file: work_order.sql

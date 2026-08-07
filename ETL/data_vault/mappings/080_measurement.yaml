@@ -1,0 +1,7 @@
+pipeline: measurement
+order: 80
+source: oltp.measurement
+targets:
+  - data_vault.sat_substation_measurement
+  - data_vault.sat_line_measurement
+sql_file: measurement.sql

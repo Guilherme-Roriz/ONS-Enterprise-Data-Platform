@@ -1,0 +1,9 @@
+pipeline: power_plant
+order: 40
+source: oltp.plant
+targets:
+  - data_vault.hub_power_plant
+  - data_vault.sat_power_plant_attributes
+  - data_vault.sat_power_plant_status
+  - data_vault.link_power_plant_state
+sql_file: power_plant.sql

@@ -1,0 +1,7 @@
+pipeline: maintenance_type
+order: 30
+source: oltp.maintenance_type
+targets:
+  - data_vault.hub_maintenance_type
+  - data_vault.sat_maintenance_type_attributes
+sql_file: maintenance_type.sql

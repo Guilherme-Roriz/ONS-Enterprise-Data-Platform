@@ -4,8 +4,8 @@
 **Layer:** Enterprise Data Warehouse (Data Vault)  
 **Data Source:** OLTP (PostgreSQL)  
 **Author:** Guilherme Roriz  
-**Date:** 27/07/2026  
-**Version:** 1.2
+**Date:** 07/08/2026
+**Version:** 1.3
 
 ---
 
@@ -503,7 +503,7 @@ Linked to `hub_transmission_line`; receives rows from `measurement` where `asset
 | asset_status              | `sat_power_plant_daily_snapshot`, `sat_substation_daily_snapshot`, `sat_line_daily_snapshot` (split by `asset_type`)    |
 | state                     | `hub_state`, `sat_state_attributes` (SCD1)                                                                             |
 
-All loads are incremental, using timestamps or CDC from the OLTP. Master data and event tables are compared via `hash_diff` to detect changes: SCD2 satellites close the previous row (`end_date`) and insert a new one; SCD1 satellites overwrite the single existing row in place.
+Loads are set-based and idempotent. Reference tables are scanned in full because they do not expose update timestamps; their SCD1 satellites update only when `hash_diff` changes. Timestamped master/event tables use `last_updated` as their SCD2 effective date, closing the previous row and inserting a new version. Transactional and snapshot satellites upsert on their declared natural grain. Partial unique indexes enforce one current row per SCD2 parent.
 
 ---
 
@@ -514,3 +514,4 @@ All loads are incremental, using timestamps or CDC from the OLTP. Master data an
 | 1.0     | 23/07/2026 | Initial Raw Data Vault design                                                                        | Guilherme Roriz  |
 | 1.1     | 24/07/2026 | Replaced polymorphic links with separate links per asset type; switched to SHA‑256 hashing; removed Galaxy‑specific consumption notes; removed `asset_age_years` from satellites; added `hash_key_occurrence_type` and `hash_key_maintenance_type` to respective satellites; renamed `link_line_substation` to `link_transmission_line_substation`; adjusted ETL mapping and added measurement split rationale | Guilherme Roriz  |
 | 1.2     | 27/07/2026 | Added `UNIQUE` constraint on all Hub business-key columns (design convention updated in Section 2); changed `sat_occurrence_detail` and `sat_work_order_detail` from "SCD1 overwrite (simplified)" to full **SCD2** with `start_date`/`end_date` and composite PK `(hash_key, start_date)`, to align design with DDL v1.2 and provide auditable history for both event types; clarified in Section 2 that `sat_state_attributes`, `sat_occurrence_type_attributes`, and `sat_maintenance_type_attributes` remain the only SCD1 (overwrite) satellites, as an explicit exception to the general insert-only/SCD2 convention | Guilherme Roriz  |
+| 1.3     | 07/08/2026 | Aligned the executable OLTP → Data Vault mappings with all DDL objects; documented full-source SCD1 loading, effective-dated SCD2 behavior, idempotent transactional/snapshot upserts, and one-current-version integrity indexes | Guilherme Roriz  |

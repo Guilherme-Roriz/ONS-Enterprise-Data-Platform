@@ -1,0 +1,9 @@
+pipeline: transmission_line
+order: 60
+source: oltp.transmission_line
+targets:
+  - data_vault.hub_transmission_line
+  - data_vault.sat_line_attributes
+  - data_vault.sat_line_status
+  - data_vault.link_transmission_line_substation
+sql_file: transmission_line.sql

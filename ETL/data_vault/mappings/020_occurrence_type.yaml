@@ -1,0 +1,7 @@
+pipeline: occurrence_type
+order: 20
+source: oltp.occurrence_type
+targets:
+  - data_vault.hub_occurrence_type
+  - data_vault.sat_occurrence_type_attributes
+sql_file: occurrence_type.sql

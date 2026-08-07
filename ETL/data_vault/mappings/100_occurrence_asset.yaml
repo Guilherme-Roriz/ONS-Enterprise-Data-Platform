@@ -1,0 +1,8 @@
+pipeline: occurrence_asset
+order: 100
+source: oltp.occurrence_asset
+targets:
+  - data_vault.link_occurrence_power_plant
+  - data_vault.link_occurrence_substation
+  - data_vault.link_occurrence_transmission_line
+sql_file: occurrence_asset.sql

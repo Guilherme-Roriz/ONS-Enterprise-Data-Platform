@@ -1,119 +1,179 @@
-"""
-Generic ETL ingestion engine.
-Processes all YAML mappings, orchestrating the Data Vault loaders.
-"""
+"""Configuration-driven OLTP to Data Vault transformation engine."""
+
+from __future__ import annotations
+
 import logging
+import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import pandas as pd
+from typing import Any
+
 import yaml
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, text
 
 from ETL.common.control import ETLControl
-from ETL.data_vault.core.hub_loader import HubLoader
-from ETL.data_vault.core.link_loader import LinkLoader
-from ETL.data_vault.core.satellite_loader import SatelliteLoader
 
 logger = logging.getLogger(__name__)
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_MAPPINGS_DIR = PACKAGE_DIR / "mappings"
+DEFAULT_SQL_DIR = PACKAGE_DIR / "sql"
+IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
 
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent / "mappings"
+
+@dataclass(frozen=True)
+class PipelineStep:
+    """One ordered OLTP to Data Vault transformation."""
+
+    name: str
+    order: int
+    source: str
+    targets: tuple[str, ...]
+    sql_file: Path
+
+
+def discover_steps(
+    mappings_dir: Path = DEFAULT_MAPPINGS_DIR,
+    sql_dir: Path = DEFAULT_SQL_DIR,
+) -> list[PipelineStep]:
+    """Load and validate all first-stage YAML mappings."""
+    steps: list[PipelineStep] = []
+    sql_root = sql_dir.resolve()
+
+    for mapping_path in sorted(mappings_dir.glob("*.yaml")):
+        with mapping_path.open("r", encoding="utf-8") as stream:
+            mapping: dict[str, Any] = yaml.safe_load(stream) or {}
+
+        required = {"pipeline", "order", "source", "targets", "sql_file"}
+        missing = required.difference(mapping)
+        if missing:
+            raise ValueError(
+                f"{mapping_path.name} is missing: {', '.join(sorted(missing))}"
+            )
+
+        source = str(mapping["source"])
+        targets = tuple(str(target) for target in mapping["targets"])
+        if not IDENTIFIER.fullmatch(source):
+            raise ValueError(
+                f"Unsafe source identifier in {mapping_path.name}: {source}"
+            )
+        if not targets or any(not IDENTIFIER.fullmatch(target) for target in targets):
+            raise ValueError(f"Invalid target list in {mapping_path.name}")
+
+        sql_path = (sql_dir / str(mapping["sql_file"])).resolve()
+        if sql_root not in sql_path.parents or not sql_path.is_file():
+            raise ValueError(f"Invalid SQL file in {mapping_path.name}: {sql_path}")
+
+        steps.append(
+            PipelineStep(
+                name=str(mapping["pipeline"]),
+                order=int(mapping["order"]),
+                source=source,
+                targets=targets,
+                sql_file=sql_path,
+            )
+        )
+
+    if not steps:
+        raise RuntimeError(f"No Data Vault mappings found in {mappings_dir}")
+    if len({step.name for step in steps}) != len(steps):
+        raise ValueError("Data Vault pipeline names must be unique")
+    if len({step.order for step in steps}) != len(steps):
+        raise ValueError("Data Vault pipeline order values must be unique")
+    return sorted(steps, key=lambda step: step.order)
 
 
 class ETLIngestionEngine:
-    """
-    Configuration-driven engine that loads OLTP data into the Data Vault.
-    """
+    """Run ordered, transactional and idempotent Data Vault loads."""
 
-    def __init__(self, db_engine: Engine):
+    def __init__(
+        self,
+        db_engine: Engine,
+        mappings_dir: Path = DEFAULT_MAPPINGS_DIR,
+        sql_dir: Path = DEFAULT_SQL_DIR,
+    ) -> None:
         self.engine = db_engine
-        self.hub_loader = HubLoader()
-        self.sat_loader = SatelliteLoader()
-        self.link_loader = LinkLoader()
+        self.steps = discover_steps(mappings_dir, sql_dir)
         self.control = ETLControl()
 
-    def run(self) -> None:
-        """Main entry point: process all mapping files."""
-        mapping_files = sorted(
-            path
-            for pattern in ("*.yaml", "*.yml", "*.yalm")
-            for path in MAPPINGS_DIR.glob(pattern)
-        )
-        if not mapping_files:
-            logger.warning("No YAML mapping files found in %s", MAPPINGS_DIR)
-            return
+    @staticmethod
+    def _target_label(step: PipelineStep) -> str:
+        return ",".join(step.targets)
 
+    def _audit(
+        self,
+        conn: Connection,
+        step: PipelineStep,
+        started_at: datetime,
+        ended_at: datetime,
+        rows_processed: int,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        conn.execute(
+            text("""
+                INSERT INTO etl.etl_control (
+                    pipeline, source_table, target_table, last_processed_id,
+                    rows_processed, execution_start, execution_end,
+                    execution_time, status, error_message
+                ) VALUES (
+                    :pipeline, :source, :target, 0,
+                    :rows_processed, :started_at, :ended_at,
+                    :execution_time, :status, :error_message
+                )
+            """),
+            {
+                "pipeline": f"data_vault.{step.name}",
+                "source": step.source,
+                "target": self._target_label(step),
+                "rows_processed": rows_processed,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "execution_time": (ended_at - started_at).total_seconds(),
+                "status": status,
+                "error_message": error_message,
+            },
+        )
+
+    def run(self) -> None:
+        """Execute all configured steps and stop immediately after a failure."""
         with self.engine.begin() as conn:
             self.control.ensure_table(conn)
 
-        for mapping_path in mapping_files:
-            with open(mapping_path, "r", encoding="utf-8") as f:
-                mapping = yaml.safe_load(f)
-
-            pipeline_name = mapping_path.stem
-            source_table = mapping["source_table"]
-            logger.info("="*60)
-            logger.info("Starting pipeline '%s' for source %s", pipeline_name, source_table)
-
-            start_time = datetime.now(timezone.utc)
-            rows_processed = 0
-            status = "SUCCESS"
-            last_id = 0
-
+        for step in self.steps:
+            started_at = datetime.now(timezone.utc)
+            logger.info(
+                "Starting Data Vault step %s: %s -> %s",
+                step.name,
+                step.source,
+                self._target_label(step),
+            )
             try:
                 with self.engine.begin() as conn:
-                    # 1. Determine incremental boundary
-                    last_id = self.control.get_last_processed_id(conn, pipeline_name, source_table)
-                    incremental_col = mapping.get("incremental_column", "id")
-                    logger.info("Last processed %s = %s", incremental_col, last_id)
-
-                    # 2. Read source data
-                    query = f"SELECT * FROM {source_table} WHERE {incremental_col} > {last_id} ORDER BY {incremental_col}"
-                    df = pd.read_sql(query, conn)
-                    rows_processed = len(df)
-                    logger.info("Read %d rows from %s", rows_processed, source_table)
-
-                    if df.empty:
-                        logger.info("No new rows. Skipping loading.")
-                        end_time = datetime.now(timezone.utc)
-                        self.control.update_control(
-                            conn, pipeline_name, source_table, last_id,
-                            rows_processed, "SUCCESS", start_time, end_time,
-                        )
-                        continue
-
-                    # 3. Load Hub
-                    if "hub_table" in mapping:
-                        self.hub_loader.load(conn, mapping, df)
-
-                    # 4. Load Satellite
-                    if "satellite_table" in mapping:
-                        self.sat_loader.load(conn, mapping, df)
-
-                    # 5. Load Links (if defined)
-                    self.link_loader.load(conn, mapping, df)
-
-                    # 6. Update control with new high-water mark
-                    new_max_id = int(df[incremental_col].max())
-                    end_time = datetime.now(timezone.utc)
-                    self.control.update_control(
-                        conn, pipeline_name, source_table, new_max_id,
-                        rows_processed, "SUCCESS", start_time, end_time,
+                    result = conn.execute(
+                        text(step.sql_file.read_text(encoding="utf-8"))
                     )
-
-            except Exception:
-                logger.exception("Pipeline '%s' failed", pipeline_name)
-                # Attempt to log failure to control table outside the failed transaction
-                with self.engine.begin() as err_conn:
-                    end_time = datetime.now(timezone.utc)
-                    self.control.update_control(
-                        err_conn, pipeline_name, source_table, last_id,
-                        0, "FAILED", start_time, end_time,
+                    affected = int(result.scalar_one())
+                    ended_at = datetime.now(timezone.utc)
+                    self._audit(conn, step, started_at, ended_at, affected, "SUCCESS")
+            except Exception as exc:
+                ended_at = datetime.now(timezone.utc)
+                logger.exception("Data Vault step %s failed", step.name)
+                with self.engine.begin() as conn:
+                    self._audit(
+                        conn,
+                        step,
+                        started_at,
+                        ended_at,
+                        0,
+                        "FAILED",
+                        str(exc)[:4000],
                     )
-                status = "FAILED"
+                raise
 
             logger.info(
-                "Pipeline '%s' completed with status %s (duration %s)",
-                pipeline_name,
-                status,
-                (datetime.now(timezone.utc) - start_time).total_seconds(),
+                "Completed Data Vault step %s: %d rows affected in %.3fs",
+                step.name,
+                affected,
+                (ended_at - started_at).total_seconds(),
             )

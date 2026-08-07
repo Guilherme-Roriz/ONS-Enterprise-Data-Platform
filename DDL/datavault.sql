@@ -2,11 +2,12 @@
 -- ONS Enterprise Data Platform – Raw Data Vault DDL
 -- Schema: data_vault
 -- Hash algorithm: SHA-256 (CHAR(64))
--- Version: 1.2 (corrected)
+-- Version: 1.3 (ETL integrity indexes)
 -- Corrections:
 --   - Added UNIQUE constraints on all hub business keys
 --   - Changed sat_occurrence_detail and sat_work_order_detail
 --     to full SCD2 (start_date/end_date, PK on hash + start_date)
+--   - Enforced one current row per SCD2 satellite parent
 -- ============================================================
 
 CREATE SCHEMA IF NOT EXISTS data_vault;
@@ -372,6 +373,32 @@ CREATE TABLE sat_line_measurement (
     record_source              VARCHAR(50) NOT NULL DEFAULT 'ONS_OLTP',
     PRIMARY KEY (hash_key_transmission_line, reading_timestamp)
 );
+
+-- Only one current row may exist for each SCD2 satellite parent.
+CREATE UNIQUE INDEX uq_sat_power_plant_attributes_current
+    ON sat_power_plant_attributes (hash_key_power_plant)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_power_plant_status_current
+    ON sat_power_plant_status (hash_key_power_plant)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_line_attributes_current
+    ON sat_line_attributes (hash_key_transmission_line)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_line_status_current
+    ON sat_line_status (hash_key_transmission_line)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_substation_attributes_current
+    ON sat_substation_attributes (hash_key_substation)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_substation_status_current
+    ON sat_substation_status (hash_key_substation)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_occurrence_detail_current
+    ON sat_occurrence_detail (hash_key_occurrence)
+    WHERE end_date IS NULL;
+CREATE UNIQUE INDEX uq_sat_work_order_detail_current
+    ON sat_work_order_detail (hash_key_work_order)
+    WHERE end_date IS NULL;
 
 -- ============================================================
 -- 6. Comments

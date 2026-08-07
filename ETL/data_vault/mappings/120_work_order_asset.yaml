@@ -1,0 +1,8 @@
+pipeline: work_order_asset
+order: 120
+source: oltp.work_order_asset
+targets:
+  - data_vault.link_work_order_power_plant
+  - data_vault.link_work_order_substation
+  - data_vault.link_work_order_transmission_line
+sql_file: work_order_asset.sql
