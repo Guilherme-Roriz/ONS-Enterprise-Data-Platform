@@ -1,3 +1,4 @@
+Faker>=40.0,<41
 pandas>=2.2,<4
 psycopg2-binary>=2.9,<3
 python-dotenv>=1.0,<2
