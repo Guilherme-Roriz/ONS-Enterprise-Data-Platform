@@ -37,7 +37,8 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - End-to-end project documentation
 - Complete configuration-driven OLTP → Data Vault ingestion
 - Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
-- Shared Docker image with sequential ETL container orchestration
+- Containerized PostgreSQL with automated schema and role initialization
+- Shared Python image with end-to-end pipeline orchestration
 
 ## Documentation
 
@@ -57,38 +58,37 @@ python -m ETL.data_vault.main
 python -m ETL.galaxy.main
 ```
 
-## Containerized ETL
+## Containerized Pipeline
 
-Both ETL stages use the same Python image and run as separate, sequential
-containers managed by Docker Compose:
+Docker Compose provisions PostgreSQL and runs the synthetic data generator and
+both ETL stages in sequence:
 
 ```text
-ons-etl image
-    ├── oltp-to-vault
-    └── vault-to-galaxy
+postgres → seed-oltp → oltp-to-vault → vault-to-galaxy
 ```
 
-The second container starts only after the first stage completes successfully.
-Both services share a project network and a persistent volume for ETL logs.
+The three Python jobs use the same `ons-etl:local` image. PostgreSQL must become
+healthy before data generation starts, and each downstream job waits for the
+previous stage to complete successfully. Named volumes preserve the database
+and ETL logs across container recreation.
 
 Create a local `.env` from `.env.example`, replace the placeholder credentials,
 and then run:
 
 ```bash
-docker compose build
-docker compose up
+docker compose config --quiet
+docker compose up --build -d
+docker compose logs -f seed-oltp oltp-to-vault vault-to-galaxy
 ```
 
-The PostgreSQL database currently runs outside Compose and is reached through
-`DOCKER_DB_HOST`. Database containerization, health checks, persistent storage,
-and least-privilege role provisioning are planned as the next infrastructure
-evolution.
+On the first start of an empty database volume, the PostgreSQL bootstrap creates
+the project schemas and separate non-superuser roles for OLTP loading and ETL.
 
 > The Docker configuration has been statically validated. Image build and
 > end-to-end runtime validation are still pending.
 
-See [`docs/docker.md`](docs/docker.md) for the architecture, concepts, operating
-commands, security notes, and validation checklist.
+See [`docs/docker.md`](docs/docker.md) for configuration, operating commands,
+security boundaries, persistence behavior, and troubleshooting.
 
 ## Project Status
 
