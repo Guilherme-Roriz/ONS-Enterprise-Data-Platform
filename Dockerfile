@@ -15,6 +15,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY --chown=etl:etl ETL ./ETL
+COPY --chown=etl:etl DDL ./DDL
 
 USER etl
 
