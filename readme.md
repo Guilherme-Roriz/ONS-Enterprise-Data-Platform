@@ -21,6 +21,7 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - PostgreSQL
 - SQL
 - Python
+- Docker & Docker Compose
 - Data Vault 2.0
 - Kimball Dimensional Modeling
 - Git & GitHub
@@ -36,6 +37,7 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - End-to-end project documentation
 - Complete configuration-driven OLTP → Data Vault ingestion
 - Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
+- Shared Docker image with sequential ETL container orchestration
 
 ## Documentation
 
@@ -54,6 +56,39 @@ Run the ETL stages in order:
 python -m ETL.data_vault.main
 python -m ETL.galaxy.main
 ```
+
+## Containerized ETL
+
+Both ETL stages use the same Python image and run as separate, sequential
+containers managed by Docker Compose:
+
+```text
+ons-etl image
+    ├── oltp-to-vault
+    └── vault-to-galaxy
+```
+
+The second container starts only after the first stage completes successfully.
+Both services share a project network and a persistent volume for ETL logs.
+
+Create a local `.env` from `.env.example`, replace the placeholder credentials,
+and then run:
+
+```bash
+docker compose build
+docker compose up
+```
+
+The PostgreSQL database currently runs outside Compose and is reached through
+`DOCKER_DB_HOST`. Database containerization, health checks, persistent storage,
+and least-privilege role provisioning are planned as the next infrastructure
+evolution.
+
+> The Docker configuration has been statically validated. Image build and
+> end-to-end runtime validation are still pending.
+
+See [`docs/docker.md`](docs/docker.md) for the architecture, concepts, operating
+commands, security notes, and validation checklist.
 
 ## Project Status
 
