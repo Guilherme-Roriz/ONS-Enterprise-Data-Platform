@@ -1,181 +1,189 @@
-# Docker Development Guide
+# Docker Guide
 
-- **Project:** ONS Enterprise Data Platform
-- **Scope:** ETL containerization
-- **Status:** Configuration complete; runtime validation pending
+This guide documents the Docker environment for the ONS Enterprise Data
+Platform. The stack provisions PostgreSQL, generates the synthetic OLTP data,
+and runs both ETL stages in order.
 
----
-
-## 1. Goal
-
-The current Docker design packages both ETL stages into one reusable Python
-image and runs them as two separate, sequential containers:
+## Architecture
 
 ```text
-Dockerfile
+postgres (healthy)
     |
     v
-ons-etl image
-    |-- oltp-to-vault container
-    `-- vault-to-galaxy container
+seed-oltp (completed successfully)
+    |
+    v
+oltp-to-vault (completed successfully)
+    |
+    v
+vault-to-galaxy
 ```
 
-The containers share the same code and dependencies, but Docker Compose gives
-each container a different Python command.
+PostgreSQL runs continuously. The remaining services are one-time jobs and stop
+after their command finishes. A failed job prevents its downstream service from
+starting.
 
-## 2. Image, Container, Build, and Run
+## Services
 
-- A **Dockerfile** is the recipe used to create an image.
-- An **image** is an immutable package containing Python, dependencies, and ETL
-  code.
-- A **container** is a running or stopped instance of an image.
-- `docker compose build` downloads the base image, installs dependencies, and
-  creates the ETL image.
-- `docker compose up` creates and runs the containers from that image.
+| Service | Image | Responsibility |
+|---|---|---|
+| `postgres` | `postgres:17-alpine` | Hosts the OLTP, Data Vault, Galaxy, and ETL control schemas. |
+| `seed-oltp` | `ons-etl:local` | Generates and loads the synthetic OLTP fixture data. |
+| `oltp-to-vault` | `ons-etl:local` | Loads the operational data into the Data Vault model. |
+| `vault-to-galaxy` | `ons-etl:local` | Builds the Galaxy dimensional model from Data Vault. |
 
-The Dockerfile does not download or execute anything by itself. Docker only
-follows its instructions when a build command is executed.
+The three Python jobs use the same locally built image. Compose assigns a
+different command and database role to each service.
 
-## 3. Current Files
+## Docker Files
 
-| File | Responsibility |
+| Path | Responsibility |
 |---|---|
-| `Dockerfile` | Builds the shared ETL image. |
-| `.dockerignore` | Removes secrets, caches, logs, tests, and development files from the build context. |
-| `compose.yaml` | Defines the two ETL jobs, their execution order, network, environment, and log volume. |
-| `.env.example` | Documents the required configuration without exposing real credentials. |
+| `Dockerfile` | Builds the shared, non-root Python image for data generation and ETL. |
+| `compose.yaml` | Defines the services, execution order, health check, network, and volumes. |
+| `.dockerignore` | Excludes local secrets, caches, logs, tests, and development-only files from the build context. |
+| `.env.example` | Provides the versioned environment variable template. |
+| `docker/postgres/init/10-bootstrap.sh` | Creates database roles, applies the schemas, and grants least-privilege access. |
+| `DDL/` | Contains the schema definitions and the synthetic data generator used during initialization. |
 
-These files remain at the repository root because the Docker build context is
-the project root and needs direct access to `requirements.txt` and `ETL/`.
+These files intentionally use the repository root as the Docker build context,
+because the image needs `requirements.txt`, `ETL/`, and `DDL/`.
 
-## 4. Image Design
+## Configuration
 
-The shared image uses `python:3.13-slim`, installs `requirements.txt`, and copies
-the complete `ETL/` package, including its YAML mappings and SQL transformations.
-
-Dependencies are copied and installed before the ETL source code. This allows
-Docker to reuse the dependency layer when application code changes without a
-change to `requirements.txt`.
-
-The image runs as the non-root Linux user `etl`. This user is unrelated to the
-PostgreSQL role configured through `DB_USER`.
-
-## 5. Compose Design
-
-`x-etl-common` is a reusable YAML configuration block, not a third container.
-Both services inherit it and use the same `ons-etl:local` image.
-
-The services run these commands:
-
-```text
-oltp-to-vault:   python -m ETL.data_vault.main
-vault-to-galaxy: python -m ETL.galaxy.main
-```
-
-`vault-to-galaxy` uses `service_completed_successfully`, so it starts only after
-`oltp-to-vault` exits with status code `0`. A failed first stage therefore blocks
-the dependent transformation.
-
-The services are one-time jobs rather than long-running servers, so their
-restart policy is `"no"`.
-
-## 6. Network and Logs
-
-Both ETL services join the `ons-network` bridge network. The network currently
-provides an isolated project boundary and will later allow the ETLs to reach a
-containerized PostgreSQL service by its service name.
-
-The `etl-logs` named volume is mounted at `/app/ETL/logs`. It preserves ETL log
-files independently of the lifecycle of an individual container.
-
-## 7. Environment Configuration
-
-Real credentials must never be committed. Each developer creates a local `.env`
-from the versioned template:
-
-```bash
-cp .env.example .env
-```
-
-PowerShell equivalent:
+Create a local environment file before starting the stack:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-The developer must then replace the placeholder values in `.env`.
+On Bash-compatible shells:
 
-- `DB_HOST=localhost` is used when Python runs directly on the host.
-- `DOCKER_DB_HOST=host.docker.internal` allows an ETL container to reach a
-  PostgreSQL instance running on the host machine.
-- When PostgreSQL becomes a Compose service, `DOCKER_DB_HOST` will use the
-  database service name instead.
+```bash
+cp .env.example .env
+```
 
-`DB_USER` should identify a dedicated, non-superuser PostgreSQL role. The role
-name is configurable, but the role must exist and have the permissions required
-to read `oltp` and load `data_vault`, `galaxy`, and `etl`.
+Replace every password placeholder in `.env`. The local `.env` is ignored by
+Git and must not be committed.
 
-## 8. Commands for Future Runtime Validation
+| Variable | Used for |
+|---|---|
+| `POSTGRES_ADMIN_USER` | PostgreSQL initialization administrator. |
+| `POSTGRES_ADMIN_PASSWORD` | Password for the initialization administrator. |
+| `POSTGRES_PORT` | PostgreSQL port published on the host. |
+| `DB_NAME` | Database created for the platform. |
+| `DB_USER` / `DB_PASSWORD` | Non-superuser role used by the ETL jobs. |
+| `OLTP_USER` / `OLTP_PASSWORD` | Non-superuser role used only to load synthetic OLTP data. |
+| `DB_HOST` / `DB_PORT` | Connection used when Python runs directly on the host. |
+| `DOCKER_DB_HOST` | PostgreSQL hostname used inside the Compose network. Keep the default `postgres`. |
+| `GALAXY_START_DATE` / `GALAXY_END_DATE` | Calendar range generated by the Galaxy ETL. |
+| `LOG_LEVEL` | Python ETL log level. |
 
-Run these commands from the repository root after Docker is installed and `.env`
-has been configured:
+The PostgreSQL administrator, OLTP loader, and ETL user must have different role
+names. Administrator credentials are passed only to the database container.
+Application containers receive only the credentials required by their job.
+
+The Linux user named `etl` inside the Python image is separate from the
+PostgreSQL role configured through `DB_USER`.
+
+## Database Initialization
+
+On the first startup of an empty `postgres-data` volume, the PostgreSQL image
+runs `docker/postgres/init/10-bootstrap.sh`. The script:
+
+1. Creates or updates the OLTP loader and ETL roles as non-superusers.
+2. Applies the DDL in this order:
+   - `DDL/oltp.sql`
+   - `DDL/datavault.sql`
+   - `DDL/fact_constelation.sql`
+   - `DDL/etl.sql`
+3. Grants the OLTP loader permission to populate only the operational schema.
+4. Grants the ETL role read access to OLTP and write access to Data Vault,
+   Galaxy, and ETL control objects.
+
+Initialization scripts do not run again while the named database volume already
+contains a PostgreSQL cluster. This preserves data across container recreation.
+
+## Start the Stack
+
+From the repository root:
 
 ```bash
 docker compose config --quiet
-docker compose build
-docker compose up
+docker compose up --build -d
+docker compose logs -f seed-oltp oltp-to-vault vault-to-galaxy
 ```
 
-Useful inspection commands:
+The first command validates the resolved Compose configuration. The second
+builds the shared Python image and starts the full pipeline. The log command
+follows all one-time jobs; stop following logs with `Ctrl+C` without stopping
+the containers.
+
+Inspect the final state with:
 
 ```bash
 docker compose ps --all
-docker compose logs oltp-to-vault
-docker compose logs vault-to-galaxy
 ```
 
-Remove the project containers and network while preserving the named log volume:
+A successful run leaves `postgres` healthy and the three one-time jobs with exit
+code `0`.
+
+## Connect to PostgreSQL
+
+From the host, connect with:
+
+```text
+host: localhost
+port: value of POSTGRES_PORT
+database: value of DB_NAME
+```
+
+From another Compose service, use `postgres:5432`. Container-to-container
+traffic uses the private `ons-network` network and does not use the published
+host port.
+
+## Re-run, Stop, and Reset
+
+The OLTP generator skips its load when operational data already exists. Both ETL
+stages are designed to be safe to execute again against the same database.
+
+Re-run the pipeline jobs:
+
+```bash
+docker compose up -d seed-oltp oltp-to-vault vault-to-galaxy
+```
+
+Stop and remove containers and the project network while preserving database
+and log volumes:
 
 ```bash
 docker compose down
 ```
 
-## 9. Planned PostgreSQL Container
+For a completely fresh local database, remove the named volumes as well:
 
-Database containerization is intentionally deferred, but it is part of the
-planned architecture:
-
-```text
-ons-network
-|-- postgres
-|-- oltp-to-vault
-`-- vault-to-galaxy
+```bash
+docker compose down --volumes
 ```
 
-The PostgreSQL implementation should add:
+Warning: the last command permanently deletes the local PostgreSQL data and the
+persisted ETL logs for this Compose project.
 
-1. An official PostgreSQL image.
-2. A named volume for durable database storage.
-3. A health check using `pg_isready`.
-4. ETL dependencies on a healthy database.
-5. Initialization scripts for the existing DDL files.
-6. A dedicated non-superuser ETL role and explicit grants.
-7. The PostgreSQL service name as `DOCKER_DB_HOST`.
+## Troubleshooting
 
-This is the point at which a dedicated `docker/postgres/` directory may become
-useful for initialization and permission scripts. No real passwords should be
-stored in those scripts.
+- **A required variable is missing:** create `.env` from `.env.example` and set
+  all password values.
+- **Port 5432 is already in use:** change `POSTGRES_PORT` in `.env`; the internal
+  container port remains `5432`.
+- **A DDL or initialization change was not applied:** initialization runs only
+  for an empty database volume. Reset the volumes only when losing local data is
+  acceptable.
+- **A downstream job did not start:** inspect the preceding job with
+  `docker compose logs <service>`. Compose starts the next stage only after a
+  successful exit.
+- **A job failed:** inspect all container states with `docker compose ps --all`
+  and then read the failed service logs.
 
-## 10. Validation Checklist
-
-- [x] Dockerfile created.
-- [x] Docker build context exclusions defined.
-- [x] Two sequential ETL services defined.
-- [x] Shared network and persistent log volume defined.
-- [x] Environment template documented.
-- [x] Compose YAML structure parsed successfully.
-- [ ] Docker image built locally.
-- [ ] OLTP to Data Vault container completed successfully.
-- [ ] Data Vault to Galaxy container completed successfully.
-- [ ] Log persistence verified.
-- [ ] PostgreSQL service containerized.
+The configuration and Python entry points have been validated statically.
+Building the images and completing an end-to-end run still require a machine
+with Docker Engine and Docker Compose installed.
