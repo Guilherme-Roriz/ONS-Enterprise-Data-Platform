@@ -58,22 +58,19 @@ python -m ETL.data_vault.main
 python -m ETL.galaxy.main
 ```
 
-## Containerized Pipeline
+## Docker
 
-Docker Compose provisions PostgreSQL and runs the synthetic data generator and
-both ETL stages in sequence:
+The local Docker stack follows the same path as the data:
 
 ```text
 postgres → seed-oltp → oltp-to-vault → vault-to-galaxy
 ```
 
-The three Python jobs use the same `ons-etl:local` image. PostgreSQL must become
-healthy before data generation starts, and each downstream job waits for the
-previous stage to complete successfully. Named volumes preserve the database
-and ETL logs across container recreation.
+PostgreSQL stays running, while the other three containers do one job and exit.
+They share the same Python image because the dependencies are the same; Compose
+only changes the command and database user for each step.
 
-Create a local `.env` from `.env.example`, replace the placeholder credentials,
-and then run:
+To try it, copy `.env.example` to `.env`, change the example passwords, and run:
 
 ```bash
 docker compose config --quiet
@@ -81,14 +78,16 @@ docker compose up --build -d
 docker compose logs -f seed-oltp oltp-to-vault vault-to-galaxy
 ```
 
-On the first start of an empty database volume, the PostgreSQL bootstrap creates
-the project schemas and separate non-superuser roles for OLTP loading and ETL.
+On its first start, PostgreSQL creates the schemas and the separate users used by
+the data generator and the ETLs. The database and ETL logs live in named volumes,
+so stopping the containers does not delete them.
 
-> The Docker configuration has been statically validated. Image build and
-> end-to-end runtime validation are still pending.
+I have not run the stack locally yet because Docker is not installed on the
+current machine. The configuration and Python code have been checked, but the
+first image build and end-to-end run are still pending.
 
-See [`docs/docker.md`](docs/docker.md) for configuration, operating commands,
-security boundaries, persistence behavior, and troubleshooting.
+The commands, environment variables, reset instructions, and network image are
+in [`docs/docker.md`](docs/docker.md).
 
 ## Project Status
 
