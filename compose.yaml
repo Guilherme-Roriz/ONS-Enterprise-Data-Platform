@@ -1,0 +1,37 @@
+name: ons-data-platform
+
+x-etl-common: &etl-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: ons-etl:local
+  env_file:
+    - .env
+  environment:
+    DB_HOST: ${DOCKER_DB_HOST:-host.docker.internal}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  networks:
+    - ons-network
+  volumes:
+    - etl-logs:/app/ETL/logs
+  restart: "no"
+
+services:
+  oltp-to-vault:
+    <<: *etl-common
+    command: ["python", "-m", "ETL.data_vault.main"]
+
+  vault-to-galaxy:
+    <<: *etl-common
+    command: ["python", "-m", "ETL.galaxy.main"]
+    depends_on:
+      oltp-to-vault:
+        condition: service_completed_successfully
+
+networks:
+  ons-network:
+    driver: bridge
+
+volumes:
+  etl-logs:
