@@ -1,0 +1,29 @@
+# Version control
+.git
+.gitignore
+
+# Local environment and secrets
+.env
+.env.*
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime output
+ETL/logs/
+
+# Development-only project files
+DDL/
+docs/
+tests/
+*.md
+
+# Editor and operating system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
