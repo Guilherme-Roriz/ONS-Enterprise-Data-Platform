@@ -17,7 +17,6 @@ venv/
 ETL/logs/
 
 # Development-only project files
-DDL/
 docs/
 tests/
 *.md
