@@ -4,6 +4,8 @@ This guide documents the Docker environment for the ONS Enterprise Data
 Platform. The stack provisions PostgreSQL, generates the synthetic OLTP data,
 and runs both ETL stages in order.
 
+![Docker network architecture](assets/docker-network.png)
+
 ## Architecture
 
 ```text
