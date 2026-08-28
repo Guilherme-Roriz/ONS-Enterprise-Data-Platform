@@ -121,6 +121,13 @@ class AirflowComposeTests(unittest.TestCase):
             dependency = self.services[service_name]["depends_on"]["airflow-init"]
             self.assertEqual("service_completed_successfully", dependency["condition"])
 
+    def test_scheduler_waits_for_the_execution_api(self) -> None:
+        dependency = self.services["airflow-scheduler"]["depends_on"][
+            "airflow-api-server"
+        ]
+
+        self.assertEqual("service_healthy", dependency["condition"])
+
     def test_original_container_pipeline_remains_available_as_a_profile(self) -> None:
         for service_name in ("seed-oltp", "oltp-to-vault", "vault-to-galaxy"):
             self.assertEqual(["manual"], self.services[service_name]["profiles"])

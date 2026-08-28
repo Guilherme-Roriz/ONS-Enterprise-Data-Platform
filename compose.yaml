@@ -191,6 +191,8 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+      airflow-api-server:
+        condition: service_healthy
 
   airflow-dag-processor:
     <<: *airflow-common
