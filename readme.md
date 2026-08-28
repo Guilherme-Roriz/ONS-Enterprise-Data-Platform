@@ -22,6 +22,7 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - SQL
 - Python
 - Docker & Docker Compose
+- Apache Airflow 3
 - Data Vault 2.0
 - Kimball Dimensional Modeling
 - Git & GitHub
@@ -39,6 +40,7 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
 - Containerized PostgreSQL with automated schema and role initialization
 - Shared Python image with end-to-end pipeline orchestration
+- Scheduled Airflow DAG with retries, timeouts, and Asset lineage
 
 ## Documentation
 
@@ -48,6 +50,7 @@ ETL operating guides:
 
 - [`ETL/1ETL.md`](ETL/1ETL.md) — OLTP → Data Vault
 - [`ETL/2ETL.md`](ETL/2ETL.md) — Data Vault → Galaxy
+- [`docs/airflow.md`](docs/airflow.md) — Airflow architecture and local operation
 
 Install the Python dependencies with `pip install -r requirements.txt` and copy `.env.example` to `.env`.
 
@@ -60,31 +63,46 @@ python -m ETL.galaxy.main
 
 ## Docker
 
-The local Docker stack follows the same path as the data:
+The local Docker stack runs PostgreSQL and Airflow. The DAG follows the same
+path as the data:
 
 ```text
-postgres → seed-oltp → oltp-to-vault → vault-to-galaxy
+seed_oltp → load_data_vault → publish_galaxy
 ```
 
-PostgreSQL stays running, while the other three containers do one job and exit.
-They share the same Python image because the dependencies are the same; Compose
-only changes the command and database user for each step.
+Airflow uses a separate metadata database and `LocalExecutor`. The API server,
+scheduler, and DAG processor run as separate Airflow 3 services. The scheduler
+executes the existing Python entry points from a custom image; ETL rules are not
+duplicated in the DAG.
 
-To try it, copy `.env.example` to `.env`, change the example passwords, and run:
+To try it, copy `.env.example` to `.env`, change the example passwords, and
+generate `AIRFLOW_FERNET_KEY` and `AIRFLOW_API_JWT_SECRET`. The exact commands,
+generated login, health checks, and DAG walkthrough are in
+[`docs/airflow.md`](docs/airflow.md).
+
+Then run:
 
 ```bash
 docker compose config --quiet
-docker compose up --build -d
-docker compose logs -f seed-oltp oltp-to-vault vault-to-galaxy
+docker compose up --build airflow-init
+docker compose up -d
 ```
 
-On its first start, PostgreSQL creates the schemas and the separate users used by
-the data generator and the ETLs. The database and ETL logs live in named volumes,
-so stopping the containers does not delete them.
+The original container-only sequence remains available through the `manual`
+profile:
+
+```bash
+docker compose --profile manual up --build \
+  seed-oltp oltp-to-vault vault-to-galaxy
+```
+
+On its first start, PostgreSQL creates the schemas and the separate users used
+by the data generator and ETLs. The databases and runtime logs live in named
+volumes, so stopping the containers does not delete them.
 
 I have not run the stack locally yet because Docker is not installed on the
 current machine. The configuration and Python code have been checked, but the
-first image build and end-to-end run are still pending.
+first Airflow image build and end-to-end DAG run are still pending.
 
 The commands, environment variables, reset instructions, and network image are
 in [`docs/docker.md`](docs/docker.md).
