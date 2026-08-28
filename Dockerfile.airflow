@@ -11,6 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 USER airflow
 
+RUN mkdir -p /opt/airflow/auth
+
 COPY --chown=airflow:0 requirements.txt /tmp/requirements/project.txt
 COPY --chown=airflow:0 airflow/requirements.txt /tmp/requirements/airflow.txt
 
