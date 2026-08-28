@@ -1,0 +1,2 @@
+# Airflow providers are versioned independently from Airflow core.
+apache-airflow-providers-standard==1.18.0
