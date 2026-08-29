@@ -50,25 +50,50 @@ def has_existing_data(cur):
 
 
 def bulk_insert_returning(cur, table, columns, rows, returning_col):
+def fetch_ids(cur, table, id_col, key_col, key_values):
+    """Return IDs for business keys in the same order as key_values."""
+    cur.execute(
+        f"SELECT {id_col}, {key_col} FROM {table} WHERE {key_col} = ANY(%s)",
+        (key_values,),
+    )
+    ids_by_key = {key: row_id for row_id, key in cur.fetchall()}
+    return [ids_by_key[key] for key in key_values]
+
+
+def bulk_insert_returning(
+    cur, table, columns, rows, returning_col, key_col, conflict_columns
+):
     """
     Insert multiple rows and return a list of the specified column values.
     """
     if not rows:
         return []
-    col_names = ", ".join(columns)
-    sql = (
-        f"INSERT INTO {table} ({col_names}) VALUES %s "
-        f"RETURNING {returning_col}"
-    )
-    results = psycopg2.extras.execute_values(cur, sql, rows, fetch=True)
-    return [row[0] for row in results]
+    insert_rows(cur, table, columns, rows, conflict_columns)
+    key_index = columns.index(key_col)
+    key_values = [row[key_index] for row in rows]
+    return fetch_ids(cur, table, returning_col, key_col, key_values)
 
-def insert_rows(cur, table, columns, rows):
-    """Simple INSERT – caller must commit afterwards."""
+
+def insert_rows(cur, table, columns, rows, conflict_columns):
+    """Insert only missing rows; caller must commit afterwards."""
     if not rows:
         return
     col_names = ", ".join(columns)
-    sql = f"INSERT INTO {table} ({col_names}) VALUES %s"
+    conflict_target = ", ".join(conflict_columns)
+    selected_columns = ", ".join(f"incoming.{column}" for column in columns)
+    key_match = " AND ".join(
+        f"existing.{column} = incoming.{column}"
+        for column in conflict_columns
+    )
+    sql = (
+        f"INSERT INTO {table} ({col_names}) "
+        f"SELECT {selected_columns} "
+        f"FROM (VALUES %s) AS incoming ({col_names}) "
+        f"WHERE NOT EXISTS ("
+        f"SELECT 1 FROM {table} AS existing WHERE {key_match}"
+        f") "
+        f"ON CONFLICT ({conflict_target}) DO NOTHING"
+    )
     psycopg2.extras.execute_values(cur, sql, rows)
 
 # ------------------------------------------------------------------------------
@@ -101,7 +126,7 @@ def populate_state(cur):
     return bulk_insert_returning(
         cur, "state",
         ["state_code", "state_name", "ons_control_area"],
-        rows, "state_id"
+        rows, "state_id", "state_code", ["state_code"]
     )
 
 def populate_occurrence_type(cur):
@@ -116,7 +141,11 @@ def populate_occurrence_type(cur):
         ("EMG_STORM", "Emergency", "Storm Damage", "Critical"),
     ]
     rows = [(code, cat, sub, sev) for code, cat, sub, sev in types]
-    insert_rows(cur, "occurrence_type", ["type_code", "category", "subtype", "severity_level"], rows)
+    return bulk_insert_returning(
+        cur, "occurrence_type",
+        ["type_code", "category", "subtype", "severity_level"],
+        rows, "occurrence_type_id", "type_code", ["type_code"]
+    )
 
 def populate_maintenance_type(cur):
     types = [
@@ -127,7 +156,11 @@ def populate_maintenance_type(cur):
         ("CORR_LINE", "Corrective", "Line Repair", "High"),
     ]
     rows = [(code, cat, sub, pri) for code, cat, sub, pri in types]
-    insert_rows(cur, "maintenance_type", ["type_code", "category", "subtype", "priority_level"], rows)
+    return bulk_insert_returning(
+        cur, "maintenance_type",
+        ["type_code", "category", "subtype", "priority_level"],
+        rows, "maintenance_type_id", "type_code", ["type_code"]
+    )
 
 def populate_plant(cur, state_ids):
     """Insert 100 power plants and return their IDs."""
@@ -150,7 +183,7 @@ def populate_plant(cur, state_ids):
         cur, "plant",
         ["plant_code", "plant_name", "plant_type", "installed_capacity",
          "commissioning_date", "operator_name", "state_id", "status"],
-        rows, "plant_id"
+        rows, "plant_id", "plant_code", ["plant_code"]
     )
 
 def populate_substation(cur, state_ids):
@@ -169,7 +202,7 @@ def populate_substation(cur, state_ids):
         cur, "substation",
         ["substation_code", "substation_name", "voltage_level_kv",
          "substation_type", "state_id", "status"],
-        rows, "substation_id"
+        rows, "substation_id", "substation_code", ["substation_code"]
     )
 
 def populate_transmission_line(cur, sub_ids):
@@ -199,7 +232,7 @@ def populate_transmission_line(cur, sub_ids):
          "circuit_type", "origin_substation_id", "destination_substation_id", "status",
          "origin_latitude", "origin_longitude", "destination_latitude", "destination_longitude",
          "midpoint_latitude", "midpoint_longitude"],
-        rows, "line_id"
+        rows, "line_id", "line_code", ["line_code"]
     )
 
 def populate_generation_reading(cur, plant_ids):
@@ -217,7 +250,8 @@ def populate_generation_reading(cur, plant_ids):
                 available = round(random.uniform(output, float(cap)), 2)
                 rows.append((plant_id, ts, output, available))
     insert_rows(cur, "generation_reading", ["plant_id", "reading_timestamp",
-                "generation_output_mw", "available_capacity_mw"], rows)
+                "generation_output_mw", "available_capacity_mw"], rows,
+                ["plant_id", "reading_timestamp"])
 
 def populate_measurement(cur, sub_ids, line_ids):
     """3 days of hourly measurements (polymorphic)."""
@@ -245,16 +279,17 @@ def populate_measurement(cur, sub_ids, line_ids):
                 rows.append(("transmission_line", line_id, ts, power_flow, losses, freq, voltage, None, None))
     insert_rows(cur, "measurement", ["asset_type", "asset_id", "reading_timestamp",
                 "power_flow_mw", "losses_mw", "frequency_hz", "voltage_kv",
-                "system_load_mw", "reliability_index"], rows)
+                "system_load_mw", "reliability_index"], rows,
+                ["asset_type", "asset_id", "reading_timestamp"])
 
-def populate_occurrences(cur, plant_ids, sub_ids, line_ids):
+def populate_occurrences(cur, occurrence_type_ids, plant_ids, sub_ids, line_ids):
     """100 occurrence events over 3 days, some with multiple assets."""
     rows = []
     asset_rows = []
     start_ts = datetime.datetime(2026, 7, 1, 0, 0, 0)
     for i in range(1, 101):
         ticket = f"TKT-{i:04d}"
-        type_id = random.randint(1, 8)
+        type_id = random.choice(occurrence_type_ids)
         start_dt = start_ts + datetime.timedelta(hours=random.randint(0, 72))
         resolved = random.choices([True, False], weights=[70, 30])[0]
         end_dt = None if not resolved else start_dt + datetime.timedelta(minutes=random.randint(10, 600))
@@ -273,18 +308,34 @@ def populate_occurrences(cur, plant_ids, sub_ids, line_ids):
                 aid = random.choice(line_ids)
             chosen.add((atype, aid))
         for atype, aid in chosen:
-            asset_rows.append((i, atype, aid))  # occurrence_id will match insertion order
+            asset_rows.append((ticket, atype, aid))
     insert_rows(cur, "occurrence", ["ticket_number", "occurrence_type_id", "start_datetime",
-                "end_datetime", "resolved_flag", "affected_load_mw", "customers_affected"], rows)
-    insert_rows(cur, "occurrence_asset", ["occurrence_id", "asset_type", "asset_id"], asset_rows)
+                "end_datetime", "resolved_flag", "affected_load_mw", "customers_affected"], rows,
+                ["ticket_number"])
+    tickets = [row[0] for row in rows]
+    occurrence_ids = fetch_ids(
+        cur, "occurrence", "occurrence_id", "ticket_number", tickets
+    )
+    ids_by_ticket = dict(zip(tickets, occurrence_ids))
+    asset_rows = [
+        (ids_by_ticket[ticket], asset_type, asset_id)
+        for ticket, asset_type, asset_id in asset_rows
+    ]
+    insert_rows(
+        cur,
+        "occurrence_asset",
+        ["occurrence_id", "asset_type", "asset_id"],
+        asset_rows,
+        ["occurrence_id", "asset_type", "asset_id"],
+    )
 
-def populate_work_orders(cur, plant_ids, sub_ids, line_ids):
+def populate_work_orders(cur, maintenance_type_ids, plant_ids, sub_ids, line_ids):
     """50 work orders over 3 days."""
     rows = []
     asset_rows = []
     for i in range(1, 51):
         order = f"WO-{i:04d}"
-        type_id = random.randint(1, 5)
+        type_id = random.choice(maintenance_type_ids)
         sched_date = datetime.date(2026, 7, 1) + datetime.timedelta(days=random.randint(0, 2))
         planned = round(random.uniform(1, 24), 2)
         actual = round(planned * random.uniform(0.8, 1.2), 2) if random.random() > 0.2 else None
@@ -304,11 +355,26 @@ def populate_work_orders(cur, plant_ids, sub_ids, line_ids):
                 aid = random.choice(line_ids)
             chosen.add((atype, aid))
         for atype, aid in chosen:
-            asset_rows.append((i, atype, aid))  # work_order_id sequential
+            asset_rows.append((order, atype, aid))
     insert_rows(cur, "work_order", ["order_number", "maintenance_type_id", "scheduled_date",
                 "planned_duration_hours", "actual_duration_hours", "cost", "overdue_flag",
-                "asset_availability_pct"], rows)
-    insert_rows(cur, "work_order_asset", ["work_order_id", "asset_type", "asset_id"], asset_rows)
+                "asset_availability_pct"], rows, ["order_number"])
+    order_numbers = [row[0] for row in rows]
+    work_order_ids = fetch_ids(
+        cur, "work_order", "work_order_id", "order_number", order_numbers
+    )
+    ids_by_order = dict(zip(order_numbers, work_order_ids))
+    asset_rows = [
+        (ids_by_order[order_number], asset_type, asset_id)
+        for order_number, asset_type, asset_id in asset_rows
+    ]
+    insert_rows(
+        cur,
+        "work_order_asset",
+        ["work_order_id", "asset_type", "asset_id"],
+        asset_rows,
+        ["work_order_id", "asset_type", "asset_id"],
+    )
 
 def populate_asset_status(cur, plant_ids, sub_ids, line_ids):
     """Daily snapshot for each asset for 3 days."""
@@ -328,7 +394,8 @@ def populate_asset_status(cur, plant_ids, sub_ids, line_ids):
             in_op = random.choice([True] * 98 + [False] * 2)
             rows.append((snap_date, "transmission_line", line_id, avail, in_op))
     insert_rows(cur, "asset_status", ["snapshot_date", "asset_type", "asset_id",
-                                 "availability_pct", "in_operation_flag"], rows)
+                                 "availability_pct", "in_operation_flag"], rows,
+                                 ["snapshot_date", "asset_type", "asset_id"])
 
 # ------------------------------------------------------------------------------
 # Main execution
@@ -342,8 +409,8 @@ def main():
 
             print("Populating reference tables...")
             state_ids = populate_state(cur)
-            populate_occurrence_type(cur)
-            populate_maintenance_type(cur)
+            occurrence_type_ids = populate_occurrence_type(cur)
+            maintenance_type_ids = populate_maintenance_type(cur)
 
             print("Populating master data...")
             plant_ids = populate_plant(cur, state_ids)
@@ -353,8 +420,12 @@ def main():
             print("Populating transactional data...")
             populate_generation_reading(cur, plant_ids)
             populate_measurement(cur, sub_ids, line_ids)
-            populate_occurrences(cur, plant_ids, sub_ids, line_ids)
-            populate_work_orders(cur, plant_ids, sub_ids, line_ids)
+            populate_occurrences(
+                cur, occurrence_type_ids, plant_ids, sub_ids, line_ids
+            )
+            populate_work_orders(
+                cur, maintenance_type_ids, plant_ids, sub_ids, line_ids
+            )
             populate_asset_status(cur, plant_ids, sub_ids, line_ids)
 
             conn.commit()
