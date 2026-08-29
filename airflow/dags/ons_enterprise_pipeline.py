@@ -1,26 +1,54 @@
 """
 ### ONS Enterprise Data Pipeline
 
-Orchestrates the existing project code without copying ETL rules into Airflow:
+Airflow orchestrates three isolated containers from the existing
+`ons-etl:local` image:
 
 1. generate the deterministic OLTP fixture;
 2. load the Raw Vault and Business Vault;
 3. publish the Galaxy dimensional model.
 
-Each successful task emits an Airflow Asset event, so the UI also shows the
-lineage between the three PostgreSQL layers.
+The DockerOperator sends each container only the environment needed for its
+workload. Each successful task emits an Airflow Asset event, so the UI also
+shows the lineage between the three PostgreSQL layers.
 """
 
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import Asset, dag, task
+from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.sdk import Asset, dag
 
 OLTP_ASSET = Asset("ons://postgres/oltp")
 DATA_VAULT_ASSET = Asset("ons://postgres/data-vault")
 GALAXY_ASSET = Asset("ons://postgres/galaxy")
 
-STAGE_RUNNER = "bash /opt/airflow/scripts/run_pipeline_stage.sh"
+OLTP_ENVIRONMENT = {
+    "DB_HOST": "{{ conn.ons_oltp.host }}",
+    "DB_PORT": "{{ conn.ons_oltp.port }}",
+    "DB_NAME": "{{ conn.ons_oltp.schema }}",
+    "DB_USER": "{{ conn.ons_oltp.login }}",
+    "DB_PASSWORD": "{{ conn.ons_oltp.password }}",
+}
+
+DATA_VAULT_ENVIRONMENT = {
+    "DB_HOST": "{{ conn.ons_etl.host }}",
+    "DB_PORT": "{{ conn.ons_etl.port }}",
+    "DB_NAME": "{{ conn.ons_etl.schema }}",
+    "DB_USER": "{{ conn.ons_etl.login }}",
+    "DB_PASSWORD": "{{ conn.ons_etl.password }}",
+}
+
+GALAXY_ENVIRONMENT = {
+    "DB_HOST": "{{ conn.ons_etl.host }}",
+    "DB_PORT": "{{ conn.ons_etl.port }}",
+    "DB_NAME": "{{ conn.ons_etl.schema }}",
+    "DB_USER": "{{ conn.ons_etl.login }}",
+    "DB_PASSWORD": "{{ conn.ons_etl.password }}",
+    "GALAXY_START_DATE": "{{ var.value.galaxy_start_date }}",
+    "GALAXY_END_DATE": "{{ var.value.galaxy_end_date }}",
+    "LOG_LEVEL": "{{ var.value.pipeline_log_level }}",
+}
 
 
 @dag(
@@ -42,39 +70,72 @@ STAGE_RUNNER = "bash /opt/airflow/scripts/run_pipeline_stage.sh"
 def ons_enterprise_data_pipeline():
     """Build the daily, idempotent ONS data pipeline."""
 
-    @task.bash(
+    seed_oltp = DockerOperator(
         task_id="seed_oltp",
+        image="ons-etl:local",
+        command=["python", "DDL/populate.py"],
+        docker_url="unix://var/run/docker.sock",
+        api_version="auto",
+        network_mode="ons-network",
+        environment=OLTP_ENVIRONMENT,
+        working_dir="/app",
+        mount_tmp_dir=False,
+        force_pull=False,
+        auto_remove="success",
         outlets=[OLTP_ASSET],
         execution_timeout=timedelta(minutes=20),
         do_xcom_push=False,
+        labels={
+            "ons.pipeline": "ons_enterprise_data_pipeline",
+            "ons.task": "seed_oltp",
+        },
     )
-    def seed_oltp() -> str:
-        """Create the deterministic operational dataset."""
-        return f"{STAGE_RUNNER} seed-oltp"
 
-    @task.bash(
+    load_data_vault = DockerOperator(
         task_id="load_data_vault",
+        image="ons-etl:local",
+        command=["python", "-m", "ETL.data_vault.main"],
+        docker_url="unix://var/run/docker.sock",
+        api_version="auto",
+        network_mode="ons-network",
+        environment=DATA_VAULT_ENVIRONMENT,
+        working_dir="/app",
+        mount_tmp_dir=False,
+        force_pull=False,
+        auto_remove="success",
         inlets=[OLTP_ASSET],
         outlets=[DATA_VAULT_ASSET],
         execution_timeout=timedelta(minutes=40),
         do_xcom_push=False,
+        labels={
+            "ons.pipeline": "ons_enterprise_data_pipeline",
+            "ons.task": "load_data_vault",
+        },
     )
-    def load_data_vault() -> str:
-        """Load OLTP data into the Data Vault model."""
-        return f"{STAGE_RUNNER} load-data-vault"
 
-    @task.bash(
+    publish_galaxy = DockerOperator(
         task_id="publish_galaxy",
+        image="ons-etl:local",
+        command=["python", "-m", "ETL.galaxy.main"],
+        docker_url="unix://var/run/docker.sock",
+        api_version="auto",
+        network_mode="ons-network",
+        environment=GALAXY_ENVIRONMENT,
+        working_dir="/app",
+        mount_tmp_dir=False,
+        force_pull=False,
+        auto_remove="success",
         inlets=[DATA_VAULT_ASSET],
         outlets=[GALAXY_ASSET],
         execution_timeout=timedelta(minutes=40),
         do_xcom_push=False,
+        labels={
+            "ons.pipeline": "ons_enterprise_data_pipeline",
+            "ons.task": "publish_galaxy",
+        },
     )
-    def publish_galaxy() -> str:
-        """Publish the dimensional Galaxy model for analytics."""
-        return f"{STAGE_RUNNER} publish-galaxy"
 
-    seed_oltp() >> load_data_vault() >> publish_galaxy()
+    seed_oltp >> load_data_vault >> publish_galaxy
 
 
 ons_enterprise_data_pipeline()
