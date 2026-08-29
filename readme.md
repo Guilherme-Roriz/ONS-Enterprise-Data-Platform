@@ -1,119 +1,144 @@
 # ONS Enterprise Data Platform
 
-## Overview
+The ONS Enterprise Data Platform is an end-to-end Data Engineering portfolio
+project inspired by the Brazilian National Electric System Operator.
 
-The **ONS Enterprise Data Platform** is an end-to-end Data Engineering portfolio project inspired by the Brazilian National Electric System Operator (ONS).
+It generates synthetic power-grid data and moves it through three PostgreSQL
+layers:
 
-The project simulates operational data from an electrical power grid and demonstrates how enterprise data flows through a modern analytics platform—from transactional systems to a dimensional data warehouse.
+```text
+Operational model (OLTP) -> Data Vault 2.0 -> Galaxy dimensional model
+```
 
-Its primary goal is to showcase industry-standard data engineering practices, including data modeling, ETL development, data warehousing, and analytical data preparation using a realistic business domain.
+The project demonstrates relational and dimensional modeling, configuration-
+driven ETL, idempotent loads, least-privilege database roles, containerized
+infrastructure, and Airflow orchestration.
 
-## Architecture
+## Current architecture
 
-The platform follows a modern enterprise data architecture:
+```text
+Docker Compose
+  -> project PostgreSQL
+  -> separate Airflow metadata PostgreSQL
+  -> Airflow API server, scheduler, and DAG processor
 
-> Synthetic Data Sources → Operational Database (OLTP) & Data Lake → Data Vault → Analytics & Business Intelligence
+Airflow DAG
+  -> DockerOperator
+  -> one ons-etl:local container per stage
+  -> ons-network
+  -> postgres:5432
+```
 
-For a detailed architecture diagram, see the documentation in `/docs`.
+Compose owns the local infrastructure. Airflow owns scheduling, retries,
+timeouts, task history, and Asset lineage. `DockerOperator` runs the existing
+project entry points in isolated containers:
+
+```text
+seed_oltp         -> python DDL/populate.py
+load_data_vault   -> python -m ETL.data_vault.main
+publish_galaxy    -> python -m ETL.galaxy.main
+```
+
+The Airflow image contains only the DAG and its Docker provider. ETL code and
+dependencies live in the reusable `ons-etl:local` image.
 
 ## Technologies
 
-- PostgreSQL
+- PostgreSQL 17
+- Python 3.13
 - SQL
-- Python
-- Docker & Docker Compose
-- Apache Airflow 3
+- Docker and Docker Compose
+- Apache Airflow 3.3.1
 - Data Vault 2.0
-- Kimball Dimensional Modeling
-- Git & GitHub
+- Kimball dimensional modeling
 
-## Features
+## Main features
 
-- Synthetic power system data generation
-- Enterprise data modeling
-- ETL / ELT pipelines
-- Data Warehouse implementation
-- Dimensional modeling
-- Business-oriented analytical datasets
-- End-to-end project documentation
-- Complete configuration-driven OLTP → Data Vault ingestion
-- Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
-- Containerized PostgreSQL with automated schema and role initialization
-- Shared Python image with end-to-end pipeline orchestration
-- Scheduled Airflow DAG with retries, timeouts, and Asset lineage
+- deterministic synthetic operational data;
+- separate non-superuser roles for OLTP loading and ETL;
+- configuration-driven OLTP -> Data Vault ingestion;
+- idempotent Data Vault -> Galaxy publishing with SCD2 resolution;
+- automatic PostgreSQL schema and role initialization;
+- separate project and Airflow metadata databases;
+- scheduled DAG with retries, execution timeouts, a DAG timeout, and one active
+  run at a time;
+- Asset lineage from OLTP to Data Vault to Galaxy;
+- workload isolation through `DockerOperator`;
+- legacy Compose-only execution available only through the `manual` profile.
+
+No Redis or Celery components are used by the local stack.
 
 ## Documentation
 
-Detailed technical documentation, architecture diagrams, data models, and implementation decisions are available in the **`/docs`** directory.
+- [Airflow architecture and operations](docs/airflow.md)
+- [Docker and local infrastructure](docs/docker.md)
+- [OLTP model](docs/oltp.md)
+- [Data Vault model](docs/data_vault.md)
+- [Kimball/Galaxy model](docs/kimball.md)
+- [OLTP -> Data Vault ETL](ETL/1ETL.md)
+- [Data Vault -> Galaxy ETL](ETL/2ETL.md)
 
-ETL operating guides:
+## Local start
 
-- [`ETL/1ETL.md`](ETL/1ETL.md) — OLTP → Data Vault
-- [`ETL/2ETL.md`](ETL/2ETL.md) — Data Vault → Galaxy
-- [`docs/airflow.md`](docs/airflow.md) — Airflow architecture and local operation
+Copy `.env.example` to `.env`, replace all placeholder passwords, and
+generate independent values for:
 
-Install the Python dependencies with `pip install -r requirements.txt` and copy `.env.example` to `.env`.
+- `AIRFLOW_FERNET_KEY`
+- `AIRFLOW_API_SECRET_KEY`
+- `AIRFLOW_API_JWT_SECRET`
 
-Run the ETL stages in order:
+The exact generation commands and Linux Docker socket setup are in
+[`docs/airflow.md`](docs/airflow.md#environment-variables-and-secrets).
 
-```bash
-python -m ETL.data_vault.main
-python -m ETL.galaxy.main
-```
-
-## Docker
-
-The local Docker stack runs PostgreSQL and Airflow. The DAG follows the same
-path as the data:
-
-```text
-seed_oltp → load_data_vault → publish_galaxy
-```
-
-Airflow uses a separate metadata database and `LocalExecutor`. The API server,
-scheduler, and DAG processor run as separate Airflow 3 services. The scheduler
-executes the existing Python entry points from a custom image; ETL rules are not
-duplicated in the DAG.
-
-To try it, copy `.env.example` to `.env`, change the example passwords, and
-generate `AIRFLOW_FERNET_KEY` and `AIRFLOW_API_JWT_SECRET`. The exact commands,
-generated login, health checks, and DAG walkthrough are in
-[`docs/airflow.md`](docs/airflow.md).
-
-Then run:
+Then validate, build, migrate, and start:
 
 ```bash
 docker compose config --quiet
-docker compose up --build airflow-init
+docker compose --profile manual build seed-oltp
+docker compose build airflow-init
+docker compose up airflow-init
 docker compose up -d
+docker compose ps --all
 ```
 
-The original container-only sequence remains available through the `manual`
-profile:
+Open `http://localhost:8080`, inspect
+`ons_enterprise_data_pipeline`, unpause it, and trigger a manual run. New DAGs
+start paused by design.
+
+Confirm that the DAG has no import errors:
+
+```bash
+docker compose exec airflow-scheduler airflow dags list-import-errors --output json
+```
+
+## Manual Compose flow
+
+The older Compose-only sequence is inactive during a normal start. Run it
+explicitly only while the Airflow DAG is paused and has no active run:
 
 ```bash
 docker compose --profile manual up --build \
   seed-oltp oltp-to-vault vault-to-galaxy
 ```
 
-On its first start, PostgreSQL creates the schemas and the separate users used
-by the data generator and ETLs. The databases and runtime logs live in named
-volumes, so stopping the containers does not delete them.
+## Repository tests
 
-I have not run the stack locally yet because Docker is not installed on the
-current machine. The configuration and Python code have been checked, but the
-first Airflow image build and end-to-end DAG run are still pending.
+The static suite checks the ETL contracts and the Airflow/DockerOperator
+architecture without requiring a running Airflow installation:
 
-The commands, environment variables, reset instructions, and network image are
-in [`docs/docker.md`](docs/docker.md).
+```bash
+python -m unittest discover -s tests -v
+```
 
-## Project Status
+This revision passed the static suite, but Docker is not installed on the host
+where it was prepared. Image builds, service health checks, DAG import checks,
+and the complete Airflow run are still pending on a Docker-enabled machine; see
+the exact [validation status](docs/airflow.md#validation-status-of-this-revision).
 
-🚧 In development
+## Project status
 
-This project is being developed incrementally as part of a continuous learning journey in Data Engineering and Analytics Engineering.
-
----
+In development. The project is built incrementally as a Data Engineering and
+Analytics Engineering learning portfolio.
 
 ## License
 
