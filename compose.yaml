@@ -1,0 +1,93 @@
+name: ons-data-platform
+
+x-python-service: &python-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: ons-etl:local
+  networks:
+    - ons-network
+  restart: "no"
+
+x-etl-environment: &etl-environment
+  DB_HOST: ${DOCKER_DB_HOST:-postgres}
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:-ons_edp}
+  DB_USER: ${DB_USER:-etl_user}
+  DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+  GALAXY_START_DATE: ${GALAXY_START_DATE:-2000-01-01}
+  GALAXY_END_DATE: ${GALAXY_END_DATE:-2050-12-31}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: "${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in .env}"
+      POSTGRES_DB: ${DB_NAME:-ons_edp}
+      DB_USER: ${DB_USER:-etl_user}
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+      OLTP_USER: ${OLTP_USER:-oltp_loader}
+      OLTP_PASSWORD: "${OLTP_PASSWORD:?Set OLTP_PASSWORD in .env}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./DDL:/ddl:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - ons-network
+    restart: unless-stopped
+    shm_size: "128mb"
+
+  seed-oltp:
+    <<: *python-service
+    command: ["python", "DDL/populate.py"]
+    environment:
+      DB_HOST: ${DOCKER_DB_HOST:-postgres}
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-ons_edp}
+      DB_USER: ${OLTP_USER:-oltp_loader}
+      DB_PASSWORD: "${OLTP_PASSWORD:?Set OLTP_PASSWORD in .env}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  oltp-to-vault:
+    <<: *python-service
+    command: ["python", "-m", "ETL.data_vault.main"]
+    environment: *etl-environment
+    volumes:
+      - etl-logs:/app/ETL/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seed-oltp:
+        condition: service_completed_successfully
+
+  vault-to-galaxy:
+    <<: *python-service
+    command: ["python", "-m", "ETL.galaxy.main"]
+    environment: *etl-environment
+    volumes:
+      - etl-logs:/app/ETL/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      oltp-to-vault:
+        condition: service_completed_successfully
+
+networks:
+  ons-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  etl-logs:

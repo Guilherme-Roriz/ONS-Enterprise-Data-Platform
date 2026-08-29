@@ -7,9 +7,11 @@ Description: Generates static synthetic data for all OLTP tables,
              respecting business rules and referential integrity.
 """
 
-import random
-import decimal
 import datetime
+import decimal
+import os
+import random
+
 import psycopg2
 import psycopg2.extras
 from faker import Faker
@@ -17,7 +19,13 @@ from faker import Faker
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
-DB_PARAMS = {}
+DB_PARAMS = {
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432"),
+    "dbname": os.getenv("DB_NAME", "ons_edp"),
+    "user": os.getenv("DB_USER", "oltp_loader"),
+    "password": os.getenv("DB_PASSWORD", ""),
+}
 
 SEED = 42
 random.seed(SEED)
@@ -34,6 +42,14 @@ def get_connection():
     conn.commit()
     return conn
 
+
+def has_existing_data(cur):
+    """Return whether the deterministic OLTP fixture has already been loaded."""
+    cur.execute("SELECT EXISTS (SELECT 1 FROM state LIMIT 1)")
+    return cur.fetchone()[0]
+
+
+def bulk_insert_returning(cur, table, columns, rows, returning_col):
 def fetch_ids(cur, table, id_col, key_col, key_values):
     """Return IDs for business keys in the same order as key_values."""
     cur.execute(
@@ -387,6 +403,10 @@ def populate_asset_status(cur, plant_ids, sub_ids, line_ids):
 def main():
     with get_connection() as conn:
         with conn.cursor() as cur:
+            if has_existing_data(cur):
+                print("OLTP data already exists; skipping synthetic data population.")
+                return
+
             print("Populating reference tables...")
             state_ids = populate_state(cur)
             occurrence_type_ids = populate_occurrence_type(cur)

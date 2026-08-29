@@ -21,6 +21,7 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - PostgreSQL
 - SQL
 - Python
+- Docker & Docker Compose
 - Data Vault 2.0
 - Kimball Dimensional Modeling
 - Git & GitHub
@@ -36,6 +37,8 @@ For a detailed architecture diagram, see the documentation in `/docs`.
 - End-to-end project documentation
 - Complete configuration-driven OLTP → Data Vault ingestion
 - Idempotent Data Vault → Galaxy dimensional ETL with SCD2 resolution
+- Containerized PostgreSQL with automated schema and role initialization
+- Shared Python image with end-to-end pipeline orchestration
 
 ## Documentation
 
@@ -54,6 +57,37 @@ Run the ETL stages in order:
 python -m ETL.data_vault.main
 python -m ETL.galaxy.main
 ```
+
+## Docker
+
+The local Docker stack follows the same path as the data:
+
+```text
+postgres → seed-oltp → oltp-to-vault → vault-to-galaxy
+```
+
+PostgreSQL stays running, while the other three containers do one job and exit.
+They share the same Python image because the dependencies are the same; Compose
+only changes the command and database user for each step.
+
+To try it, copy `.env.example` to `.env`, change the example passwords, and run:
+
+```bash
+docker compose config --quiet
+docker compose up --build -d
+docker compose logs -f seed-oltp oltp-to-vault vault-to-galaxy
+```
+
+On its first start, PostgreSQL creates the schemas and the separate users used by
+the data generator and the ETLs. The database and ETL logs live in named volumes,
+so stopping the containers does not delete them.
+
+I have not run the stack locally yet because Docker is not installed on the
+current machine. The configuration and Python code have been checked, but the
+first image build and end-to-end run are still pending.
+
+The commands, environment variables, reset instructions, and network image are
+in [`docs/docker.md`](docs/docker.md).
 
 ## Project Status
 
