@@ -42,6 +42,7 @@ def get_connection():
     conn.commit()
     return conn
 
+
 def fetch_ids(cur, table, id_col, key_col, key_values):
     """Return IDs for business keys in the same order as key_values."""
     cur.execute(
