@@ -1,0 +1,22 @@
+ARG AIRFLOW_VERSION=3.3.1
+ARG PYTHON_VERSION=3.13
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+ARG AIRFLOW_VERSION
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+USER airflow
+
+RUN mkdir -p /opt/airflow/auth
+
+COPY --chown=airflow:0 airflow/requirements.txt /tmp/requirements/airflow.txt
+
+RUN pip install --no-cache-dir \
+    "apache-airflow==${AIRFLOW_VERSION}" \
+    -r /tmp/requirements/airflow.txt
+
+COPY --chown=airflow:0 airflow/dags /opt/airflow/dags

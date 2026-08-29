@@ -15,9 +15,40 @@ x-etl-environment: &etl-environment
   DB_NAME: ${DB_NAME:-ons_edp}
   DB_USER: ${DB_USER:-etl_user}
   DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+
+x-galaxy-environment: &galaxy-environment
+  <<: *etl-environment
   GALAXY_START_DATE: ${GALAXY_START_DATE:-2000-01-01}
   GALAXY_END_DATE: ${GALAXY_END_DATE:-2050-12-31}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+x-airflow-environment: &airflow-environment
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}@airflow-db:5432/${AIRFLOW_DB_NAME:-airflow}"
+  AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_USERS:-admin:admin}
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  AIRFLOW__DAG_PROCESSOR__HEALTH_CHECK_THRESHOLD: "90"
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+    args:
+      AIRFLOW_VERSION: ${AIRFLOW_VERSION:-3.3.1}
+      PYTHON_VERSION: ${AIRFLOW_PYTHON_VERSION:-3.13}
+  image: ons-airflow:${AIRFLOW_VERSION:-3.3.1}
+  environment: *airflow-environment
+  user: "${AIRFLOW_UID:-50000}:0"
+  volumes:
+    - airflow-logs:/opt/airflow/logs
+  networks:
+    - ons-network
+  restart: unless-stopped
 
 services:
   postgres:
@@ -49,6 +80,7 @@ services:
 
   seed-oltp:
     <<: *python-service
+    profiles: ["manual"]
     command: ["python", "DDL/populate.py"]
     environment:
       DB_HOST: ${DOCKER_DB_HOST:-postgres}
@@ -62,6 +94,7 @@ services:
 
   oltp-to-vault:
     <<: *python-service
+    profiles: ["manual"]
     command: ["python", "-m", "ETL.data_vault.main"]
     environment: *etl-environment
     volumes:
@@ -74,8 +107,9 @@ services:
 
   vault-to-galaxy:
     <<: *python-service
+    profiles: ["manual"]
     command: ["python", "-m", "ETL.galaxy.main"]
-    environment: *etl-environment
+    environment: *galaxy-environment
     volumes:
       - etl-logs:/app/ETL/logs
     depends_on:
@@ -84,10 +118,114 @@ services:
       oltp-to-vault:
         condition: service_completed_successfully
 
+  airflow-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${AIRFLOW_DB_USER:-airflow}
+      POSTGRES_PASSWORD: "${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}"
+      POSTGRES_DB: ${AIRFLOW_DB_NAME:-airflow}
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - ons-network
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    command: ["db", "migrate"]
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    restart: "no"
+
+  airflow-api-server:
+    <<: *airflow-common
+    command: ["api-server"]
+    environment:
+      <<: *airflow-environment
+      AIRFLOW__API__SECRET_KEY: "${AIRFLOW_API_SECRET_KEY:?Set AIRFLOW_API_SECRET_KEY in .env}"
+      AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW_API_JWT_SECRET:?Set AIRFLOW_API_JWT_SECRET in .env}"
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+      - airflow-auth:/opt/airflow/auth
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: ["scheduler"]
+    environment:
+      <<: *airflow-environment
+      AIRFLOW__API__SECRET_KEY: "${AIRFLOW_API_SECRET_KEY:?Set AIRFLOW_API_SECRET_KEY in .env}"
+      AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW_API_JWT_SECRET:?Set AIRFLOW_API_JWT_SECRET in .env}"
+      AIRFLOW_CONN_ONS_OLTP: >-
+        {"conn_type":"generic","host":"${DOCKER_DB_HOST:-postgres}","port":5432,"schema":"${DB_NAME:-ons_edp}","login":"${OLTP_USER:-oltp_loader}","password":"${OLTP_PASSWORD:?Set OLTP_PASSWORD in .env}"}
+      AIRFLOW_CONN_ONS_ETL: >-
+        {"conn_type":"generic","host":"${DOCKER_DB_HOST:-postgres}","port":5432,"schema":"${DB_NAME:-ons_edp}","login":"${DB_USER:-etl_user}","password":"${DB_PASSWORD:?Set DB_PASSWORD in .env}"}
+      AIRFLOW_VAR_GALAXY_START_DATE: ${GALAXY_START_DATE:-2000-01-01}
+      AIRFLOW_VAR_GALAXY_END_DATE: ${GALAXY_END_DATE:-2050-12-31}
+      AIRFLOW_VAR_PIPELINE_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-0}"
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-api-server:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: ["dag-processor"]
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
 networks:
   ons-network:
+    name: ons-network
     driver: bridge
 
 volumes:
   postgres-data:
   etl-logs:
+  airflow-db-data:
+  airflow-logs:
+  airflow-auth:

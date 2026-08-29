@@ -1,0 +1,2 @@
+# Airflow providers are versioned independently from Airflow core.
+apache-airflow-providers-docker==4.5.9
