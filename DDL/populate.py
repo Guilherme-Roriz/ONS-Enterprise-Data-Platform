@@ -43,13 +43,6 @@ def get_connection():
     return conn
 
 
-def has_existing_data(cur):
-    """Return whether the deterministic OLTP fixture has already been loaded."""
-    cur.execute("SELECT EXISTS (SELECT 1 FROM state LIMIT 1)")
-    return cur.fetchone()[0]
-
-
-def bulk_insert_returning(cur, table, columns, rows, returning_col):
 def fetch_ids(cur, table, id_col, key_col, key_values):
     """Return IDs for business keys in the same order as key_values."""
     cur.execute(
@@ -403,10 +396,6 @@ def populate_asset_status(cur, plant_ids, sub_ids, line_ids):
 def main():
     with get_connection() as conn:
         with conn.cursor() as cur:
-            if has_existing_data(cur):
-                print("OLTP data already exists; skipping synthetic data population.")
-                return
-
             print("Populating reference tables...")
             state_ids = populate_state(cur)
             occurrence_type_ids = populate_occurrence_type(cur)
