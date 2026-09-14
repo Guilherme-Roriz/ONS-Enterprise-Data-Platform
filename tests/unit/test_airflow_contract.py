@@ -119,3 +119,43 @@ def test_airflow_image_contains_orchestration_only() -> None:
     assert "COPY --chown=airflow:0 DDL" not in dockerfile
     assert "apache-airflow-providers-docker==4.5.9" in requirements
 
+
+def test_ci_runs_real_airflow_scheduler_and_dockeroperator_e2e() -> None:
+    workflow = yaml.safe_load(
+        (PROJECT_ROOT / ".github" / "workflows" / "testing.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    airflow_job = workflow["jobs"]["airflow"]
+    assert airflow_job["needs"] == "postgres"
+    assert airflow_job["env"]["COMPOSE_PROJECT_NAME"] == "ons-airflow-e2e"
+
+    workflow_contract = json.dumps(airflow_job)
+    for fragment in (
+        "airflow-api-server",
+        "airflow-scheduler",
+        "airflow-dag-processor",
+        "run_airflow_dag.sh",
+        '"ORCHESTRATION_EXPECTED_RUNS": "0"',
+        '"ORCHESTRATION_EXPECTED_RUNS": "1"',
+        '"ORCHESTRATION_EXPECTED_RUNS": "2"',
+        "--run-orchestration",
+        "down --volumes --remove-orphans",
+    ):
+        assert fragment in workflow_contract
+
+    runner = (PROJECT_ROOT / "tests" / "e2e" / "run_airflow_dag.sh").read_text(
+        encoding="utf-8"
+    )
+    for fragment in (
+        "set -euo pipefail",
+        "airflow dags list-import-errors",
+        "SELECT count(*) FROM import_error",
+        "airflow dags trigger --run-id",
+        "SELECT state FROM dag_run",
+        "FROM task_instance",
+        "load_data_vault=success",
+        "publish_galaxy=success",
+        "seed_oltp=success",
+    ):
+        assert fragment in runner

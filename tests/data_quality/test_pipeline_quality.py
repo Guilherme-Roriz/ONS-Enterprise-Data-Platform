@@ -38,7 +38,10 @@ FACT_GRAINS = {
 }
 
 
-def test_pipeline_has_no_cross_layer_quality_breaks(admin_connection, loaded_pipeline):
+def test_pipeline_has_no_cross_layer_quality_breaks(admin_connection, request):
+    if not request.config.getoption("--run-orchestration"):
+        request.getfixturevalue("loaded_pipeline")
+
     with admin_connection.cursor() as cursor:
         for source_table, source_key, hub_table, hub_key, hash_key in HUB_CONTRACTS:
             cursor.execute(f"SELECT count(*) FROM {source_table}")

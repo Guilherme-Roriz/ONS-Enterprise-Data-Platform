@@ -22,6 +22,7 @@ point twice to prove consistency after a rerun.
 - [x] Failure paths / rollback
 - [x] Cross-layer validation
 - [x] E2E
+- [ ] Airflow scheduler / DockerOperator E2E
 - [x] Final documentation
 
 ## Verified status
@@ -126,6 +127,43 @@ the isolated database and runs Integration, Data Quality and E2E. It is
 triggered by pushes to `feature/testing`, pull requests targeting `main`, and
 manual dispatches.
 
+## Airflow scheduler and DockerOperator E2E
+
+The orchestration E2E is now prepared as a separate `airflow` job in the same
+workflow. It intentionally uses the production `compose.yaml` with an
+isolated Compose project (`ons-airflow-e2e`), database name
+`ons_edp_airflow_test`, host port `55433`, test-only credentials and fresh
+volumes. The development stack is not reused.
+
+The job performs this sequence:
+
+```text
+build ETL and Airflow images
+→ start postgres, airflow-db, airflow-init, API server, scheduler and DAG processor
+→ confirm the application database is empty
+→ wait for DAG discovery and assert zero import errors
+→ unpause and trigger ons_enterprise_data_pipeline through the Airflow CLI
+→ poll Airflow metadata until the scheduler reports success
+→ assert seed_oltp, load_data_vault and publish_galaxy are all successful
+→ run Data Quality assertions and save a pipeline snapshot
+→ trigger a second DAG run
+→ repeat Data Quality assertions and compare the snapshot for idempotency
+→ collect diagnostics and remove all Compose volumes
+```
+
+The driver is `tests/e2e/run_airflow_dag.sh`; the result contract is
+`tests/e2e/test_airflow_orchestration_result.py`; and the `orchestration`
+marker plus `--run-orchestration` flag keep this slower test separate from the
+direct-entrypoint E2E. The test also validates empty state, Airflow import
+errors, `dag_run` state, all three `task_instance` states, row counts, audit
+successes, cross-layer totals and equality between the first and second run.
+
+This job has been implemented but **has not yet been executed**. The next
+session must push the pending branch changes, monitor the new GitHub Actions
+job, and fix any Airflow 3.3.1/runner-specific issue revealed by the real
+Docker run before checking this item off. Do not describe the orchestration
+E2E as passed until that workflow job finishes successfully.
+
 ## Critical contracts
 
 ### Seed and OLTP
@@ -168,8 +206,8 @@ auditable, and a corrected rerun succeeds cleanly.
 
 ## Limitations
 
-- The E2E test executes the same Python entry points used by DockerOperator, but
-  it does not start an Airflow scheduler or trigger the DAG through Airflow.
+- The direct-entrypoint E2E is verified. The new scheduler/DockerOperator E2E
+  is implemented in CI but remains pending its first real execution.
 - Airflow/DockerOperator topology is protected by unit-level architectural
   contracts; a full Airflow runtime test remains separate operational work.
 - The suite does not currently include performance, concurrency, lock-contention

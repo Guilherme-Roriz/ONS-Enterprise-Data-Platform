@@ -86,3 +86,114 @@ jobs:
       - name: Remove isolated PostgreSQL
         if: always()
         run: docker compose -f compose.test.yaml down --volumes
+
+  airflow:
+    name: Airflow scheduler and DockerOperator E2E
+    needs: postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: ons-airflow-e2e
+      POSTGRES_ADMIN_USER: postgres
+      POSTGRES_ADMIN_PASSWORD: airflow_test_admin_password
+      POSTGRES_PORT: "55433"
+      DB_NAME: ons_edp_airflow_test
+      DB_USER: etl_airflow_test
+      DB_PASSWORD: airflow_test_etl_password
+      OLTP_USER: oltp_airflow_test
+      OLTP_PASSWORD: airflow_test_oltp_password
+      DOCKER_DB_HOST: postgres
+      GALAXY_START_DATE: "2026-07-01"
+      GALAXY_END_DATE: "2026-07-03"
+      LOG_LEVEL: WARNING
+      AIRFLOW_VERSION: "3.3.1"
+      AIRFLOW_PYTHON_VERSION: "3.13"
+      AIRFLOW_UID: "50000"
+      AIRFLOW_PORT: "58080"
+      AIRFLOW_DB_NAME: airflow
+      AIRFLOW_DB_USER: airflow
+      AIRFLOW_DB_PASSWORD: airflow_test_metadata_password
+      AIRFLOW_USERS: admin:admin
+      TEST_DB_HOST: localhost
+      TEST_DB_PORT: "55433"
+      TEST_DB_NAME: ons_edp_airflow_test
+      TEST_DB_ADMIN_USER: postgres
+      TEST_DB_ADMIN_PASSWORD: airflow_test_admin_password
+      TEST_DB_USER: etl_airflow_test
+      TEST_DB_PASSWORD: airflow_test_etl_password
+      TEST_OLTP_USER: oltp_airflow_test
+      TEST_OLTP_PASSWORD: airflow_test_oltp_password
+      ORCHESTRATION_SNAPSHOT_PATH: ${{ runner.temp }}/airflow-first-snapshot.json
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Configure isolated Airflow secrets and Docker access
+        shell: bash
+        run: |
+          echo "AIRFLOW_FERNET_KEY=$(python -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" >> "$GITHUB_ENV"
+          echo "AIRFLOW_API_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "AIRFLOW_API_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
+
+      - name: Build ETL and Airflow images
+        run: docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml --profile manual build seed-oltp airflow-init
+
+      - name: Start complete Airflow stack
+        run: >-
+          docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml
+          up -d --wait --wait-timeout 300
+          airflow-api-server airflow-scheduler airflow-dag-processor
+
+      - name: Assert empty application database
+        env:
+          ORCHESTRATION_EXPECTED_RUNS: "0"
+        run: >-
+          python -m pytest tests/e2e/test_airflow_orchestration_result.py
+          --run-orchestration --tb=short -q
+
+      - name: Trigger first scheduled pipeline run
+        run: bash tests/e2e/run_airflow_dag.sh "ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_first"
+
+      - name: Validate first orchestrated result
+        env:
+          ORCHESTRATION_EXPECTED_RUNS: "1"
+        run: >-
+          python -m pytest
+          tests/e2e/test_airflow_orchestration_result.py
+          tests/data_quality/test_pipeline_quality.py
+          --run-orchestration --tb=short -q
+
+      - name: Trigger idempotent scheduled rerun
+        run: bash tests/e2e/run_airflow_dag.sh "ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_second"
+
+      - name: Validate idempotent orchestrated rerun
+        env:
+          ORCHESTRATION_EXPECTED_RUNS: "2"
+        run: >-
+          python -m pytest
+          tests/e2e/test_airflow_orchestration_result.py
+          tests/data_quality/test_pipeline_quality.py
+          --run-orchestration --tb=short -q
+
+      - name: Show Airflow and workload diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml ps -a
+          docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml logs --no-color --tail 500 airflow-api-server airflow-scheduler airflow-dag-processor airflow-db postgres
+          docker ps -a --filter label=ons.pipeline=ons_enterprise_data_pipeline
+
+      - name: Remove isolated Airflow environment
+        if: always()
+        run: docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml down --volumes --remove-orphans

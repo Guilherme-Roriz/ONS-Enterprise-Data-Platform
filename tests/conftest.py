@@ -37,6 +37,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="run the complete empty-database pipeline and rerun scenario",
     )
+    parser.addoption(
+        "--run-orchestration",
+        action="store_true",
+        default=False,
+        help="validate a pipeline loaded by the real Airflow scheduler",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -44,12 +50,15 @@ def pytest_collection_modifyitems(
 ) -> None:
     run_integration = config.getoption("--run-integration")
     run_e2e = config.getoption("--run-e2e")
+    run_orchestration = config.getoption("--run-orchestration")
     for item in items:
-        if "e2e" in item.keywords and not run_e2e:
+        if "orchestration" in item.keywords and not run_orchestration:
+            item.add_marker(pytest.mark.skip(reason="use --run-orchestration"))
+        elif "e2e" in item.keywords and not (run_e2e or run_orchestration):
             item.add_marker(pytest.mark.skip(reason="use --run-e2e"))
         elif (
             "integration" in item.keywords or "data_quality" in item.keywords
-        ) and not (run_integration or run_e2e):
+        ) and not (run_integration or run_e2e or run_orchestration):
             item.add_marker(pytest.mark.skip(reason="use --run-integration"))
 
 
@@ -89,6 +98,7 @@ def test_database(request: pytest.FixtureRequest) -> TestDatabase:
     if not (
         request.config.getoption("--run-integration")
         or request.config.getoption("--run-e2e")
+        or request.config.getoption("--run-orchestration")
     ):
         pytest.skip("isolated PostgreSQL was not requested")
     database = TestDatabase()

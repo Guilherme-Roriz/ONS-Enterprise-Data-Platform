@@ -370,10 +370,12 @@ Vault-to-Galaxy entry points, cross-layer assertions, failure/rollback paths,
 SCD2 change behavior and a complete idempotent rerun.
 
 This evidence validates the application pipeline entry points, not the complete
-Airflow runtime. Application/Airflow image builds, scheduler DAG import and an
-Airflow-triggered DockerOperator run were not performed by this test workflow
-and must not be treated as proven. See [Testing and Data Quality](testing.md) for
-the precise scope and commands.
+Airflow runtime. A separate `airflow` job has now been added to the workflow to
+build the images, start the scheduler and DAG processor, trigger the DAG and
+validate both DockerOperator task states and the idempotent rerun. That job is
+pending its first real execution; its implementation and continuation steps
+are documented in [Testing and Data Quality](testing.md). Do not treat the
+Airflow runtime as proven until that job finishes successfully.
 
 ## Review order
 
