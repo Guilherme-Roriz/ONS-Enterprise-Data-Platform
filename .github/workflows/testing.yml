@@ -1,0 +1,77 @@
+name: Testing and Data Quality
+
+on:
+  push:
+    branches:
+      - feature/testing
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Run unit contracts
+        run: python -m pytest -m unit -q
+
+  postgres:
+    name: PostgreSQL integration, quality and E2E
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Start isolated PostgreSQL
+        run: docker compose -f compose.test.yaml up -d --wait test-db
+
+      - name: Run real-database contracts
+        run: >-
+          python -m pytest
+          -m "integration or data_quality or e2e"
+          --run-integration
+          --run-e2e
+          -q
+
+      - name: Show PostgreSQL logs on failure
+        if: failure()
+        run: docker compose -f compose.test.yaml logs --no-color test-db
+
+      - name: Remove isolated PostgreSQL
+        if: always()
+        run: docker compose -f compose.test.yaml down --volumes

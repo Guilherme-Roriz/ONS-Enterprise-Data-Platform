@@ -28,9 +28,17 @@ DB_PARAMS = {
 }
 
 SEED = 42
+SEED_LAST_UPDATED = datetime.datetime(2026, 7, 1, 0, 0, 0)
 random.seed(SEED)
 fake = Faker("pt_BR")
 fake.seed_instance(SEED)
+
+
+def reset_generators():
+    """Reset every synthetic-data generator for deterministic in-process reruns."""
+    random.seed(SEED)
+    fake.seed_instance(SEED)
+    fake.unique.clear()
 
 # ------------------------------------------------------------------------------
 # Database helper functions
@@ -171,11 +179,13 @@ def populate_plant(cur, state_ids):
         operator = fake.company()
         state_id = random.choice(state_ids)
         status = random.choice(["Active"] * 80 + ["Decommissioned"] * 10 + ["Under Construction"] * 10)
-        rows.append((code, name, ptype, cap, commission_date, operator, state_id, status))
+        rows.append((code, name, ptype, cap, commission_date, operator, state_id,
+                     status, SEED_LAST_UPDATED))
     return bulk_insert_returning(
         cur, "plant",
         ["plant_code", "plant_name", "plant_type", "installed_capacity",
-         "commissioning_date", "operator_name", "state_id", "status"],
+         "commissioning_date", "operator_name", "state_id", "status",
+         "last_updated"],
         rows, "plant_id", "plant_code", ["plant_code"]
     )
 
@@ -190,11 +200,12 @@ def populate_substation(cur, state_ids):
         stype = random.choice(stypes)
         state_id = random.choice(state_ids)
         status = random.choice(["Active"] * 170 + ["Decommissioned"] * 15 + ["Planned"] * 15)
-        rows.append((code, name, voltage, stype, state_id, status))
+        rows.append((code, name, voltage, stype, state_id, status,
+                     SEED_LAST_UPDATED))
     return bulk_insert_returning(
         cur, "substation",
         ["substation_code", "substation_name", "voltage_level_kv",
-         "substation_type", "state_id", "status"],
+         "substation_type", "state_id", "status", "last_updated"],
         rows, "substation_id", "substation_code", ["substation_code"]
     )
 
@@ -218,13 +229,14 @@ def populate_transmission_line(cur, sub_ids):
         dest_lat = round(mid_lat + random.uniform(-1, 1), 6)
         dest_lon = round(mid_lon + random.uniform(-1, 1), 6)
         rows.append((code, name, voltage, length, ctype, origin, dest, status,
-                     orig_lat, orig_lon, dest_lat, dest_lon, mid_lat, mid_lon))
+                     orig_lat, orig_lon, dest_lat, dest_lon, mid_lat, mid_lon,
+                     SEED_LAST_UPDATED))
     return bulk_insert_returning(
         cur, "transmission_line",
         ["line_code", "line_name", "voltage_level_kv", "length_km",
          "circuit_type", "origin_substation_id", "destination_substation_id", "status",
          "origin_latitude", "origin_longitude", "destination_latitude", "destination_longitude",
-         "midpoint_latitude", "midpoint_longitude"],
+         "midpoint_latitude", "midpoint_longitude", "last_updated"],
         rows, "line_id", "line_code", ["line_code"]
     )
 
@@ -288,7 +300,8 @@ def populate_occurrences(cur, occurrence_type_ids, plant_ids, sub_ids, line_ids)
         end_dt = None if not resolved else start_dt + datetime.timedelta(minutes=random.randint(10, 600))
         affected_load = round(random.uniform(0, 500), 2)
         customers = random.randint(0, 5000)
-        rows.append((ticket, type_id, start_dt, end_dt, resolved, affected_load, customers))
+        rows.append((ticket, type_id, start_dt, end_dt, resolved, affected_load,
+                     customers, SEED_LAST_UPDATED))
         num_assets = random.randint(1, 3)
         chosen = set()
         for _ in range(num_assets):
@@ -303,7 +316,8 @@ def populate_occurrences(cur, occurrence_type_ids, plant_ids, sub_ids, line_ids)
         for atype, aid in chosen:
             asset_rows.append((ticket, atype, aid))
     insert_rows(cur, "occurrence", ["ticket_number", "occurrence_type_id", "start_datetime",
-                "end_datetime", "resolved_flag", "affected_load_mw", "customers_affected"], rows,
+                "end_datetime", "resolved_flag", "affected_load_mw",
+                "customers_affected", "last_updated"], rows,
                 ["ticket_number"])
     tickets = [row[0] for row in rows]
     occurrence_ids = fetch_ids(
@@ -335,7 +349,8 @@ def populate_work_orders(cur, maintenance_type_ids, plant_ids, sub_ids, line_ids
         cost = round(random.uniform(1000, 50000), 2)
         overdue = random.choice([True, False]) if actual is not None else False
         avail = round(random.uniform(80, 100), 2)
-        rows.append((order, type_id, sched_date, planned, actual, cost, overdue, avail))
+        rows.append((order, type_id, sched_date, planned, actual, cost, overdue,
+                     avail, SEED_LAST_UPDATED))
         num_assets = random.randint(1, 2)
         chosen = set()
         for _ in range(num_assets):
@@ -351,7 +366,7 @@ def populate_work_orders(cur, maintenance_type_ids, plant_ids, sub_ids, line_ids
             asset_rows.append((order, atype, aid))
     insert_rows(cur, "work_order", ["order_number", "maintenance_type_id", "scheduled_date",
                 "planned_duration_hours", "actual_duration_hours", "cost", "overdue_flag",
-                "asset_availability_pct"], rows, ["order_number"])
+                "asset_availability_pct", "last_updated"], rows, ["order_number"])
     order_numbers = [row[0] for row in rows]
     work_order_ids = fetch_ids(
         cur, "work_order", "work_order_id", "order_number", order_numbers
@@ -394,6 +409,7 @@ def populate_asset_status(cur, plant_ids, sub_ids, line_ids):
 # Main execution
 # ------------------------------------------------------------------------------
 def main():
+    reset_generators()
     with get_connection() as conn:
         with conn.cursor() as cur:
             print("Populating reference tables...")
