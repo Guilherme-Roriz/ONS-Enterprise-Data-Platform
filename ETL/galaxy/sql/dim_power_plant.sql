@@ -82,7 +82,7 @@ WITH boundaries AS (
     ORDER BY hash_key_power_plant, version_group, start_date DESC
 ), ranged AS (
     SELECT
-        versions.*,
+        collapsed.*,
         lead(start_date) OVER (
             PARTITION BY hash_key_power_plant ORDER BY start_date
         ) AS end_date

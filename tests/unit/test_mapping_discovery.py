@@ -106,3 +106,14 @@ def test_etl_stages_share_control_infrastructure() -> None:
     assert vault_engine.DEFAULT_MAPPINGS_DIR.parent.name == "data_vault"
     assert galaxy_engine.DEFAULT_MAPPINGS_DIR.parent.name == "galaxy"
 
+
+def test_galaxy_scd2_ranged_ctes_reference_their_actual_source() -> None:
+    for filename in (
+        "dim_power_plant.sql",
+        "dim_substation.sql",
+        "dim_transmission_line.sql",
+    ):
+        source = (galaxy_engine.DEFAULT_SQL_DIR / filename).read_text(encoding="utf-8")
+        ranged_cte = source.split("), ranged AS (", maxsplit=1)[1]
+        assert "collapsed.*" in ranged_cte
+        assert "versions.*" not in ranged_cte
