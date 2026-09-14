@@ -61,12 +61,23 @@ jobs:
         run: docker compose -f compose.test.yaml up -d --wait test-db
 
       - name: Run real-database contracts
-        run: >-
-          python -m pytest
-          -m "integration or data_quality or e2e"
-          --run-integration
-          --run-e2e
-          -q
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest \
+            -m "integration or data_quality or e2e" \
+            --run-integration \
+            --run-e2e \
+            --tb=short \
+            -q 2>&1 | tee pytest-postgres.log
+          test_status=${PIPESTATUS[0]}
+          {
+            echo "## PostgreSQL contract results"
+            echo '```text'
+            tail -n 250 pytest-postgres.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$test_status"
 
       - name: Show PostgreSQL logs on failure
         if: failure()
