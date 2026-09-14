@@ -8,7 +8,6 @@ class ETLControl:
 
     @staticmethod
     def ensure_table(conn: Connection) -> None:
-        conn.execute(text("CREATE SCHEMA IF NOT EXISTS etl"))
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS etl.etl_control (

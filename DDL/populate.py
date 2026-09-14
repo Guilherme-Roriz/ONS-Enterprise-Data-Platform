@@ -81,18 +81,9 @@ def insert_rows(cur, table, columns, rows, conflict_columns):
         return
     col_names = ", ".join(columns)
     conflict_target = ", ".join(conflict_columns)
-    selected_columns = ", ".join(f"incoming.{column}" for column in columns)
-    key_match = " AND ".join(
-        f"existing.{column} = incoming.{column}"
-        for column in conflict_columns
-    )
     sql = (
         f"INSERT INTO {table} ({col_names}) "
-        f"SELECT {selected_columns} "
-        f"FROM (VALUES %s) AS incoming ({col_names}) "
-        f"WHERE NOT EXISTS ("
-        f"SELECT 1 FROM {table} AS existing WHERE {key_match}"
-        f") "
+        f"VALUES %s "
         f"ON CONFLICT ({conflict_target}) DO NOTHING"
     )
     psycopg2.extras.execute_values(cur, sql, rows)

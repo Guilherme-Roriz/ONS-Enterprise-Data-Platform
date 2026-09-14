@@ -48,3 +48,34 @@ def test_seed_source_contains_no_destructive_reset() -> None:
 
 def test_seed_uses_a_fixed_scd2_effective_timestamp() -> None:
     assert populate.SEED_LAST_UPDATED.isoformat() == "2026-07-01T00:00:00"
+
+
+def test_bulk_insert_uses_target_column_types_and_conflict_key(monkeypatch) -> None:
+    captured = {}
+
+    def fake_execute_values(cursor, sql, rows):
+        captured.update(cursor=cursor, sql=sql, rows=rows)
+
+    monkeypatch.setattr(populate.psycopg2.extras, "execute_values", fake_execute_values)
+    marker = object()
+    rows = [("substation", 1, None), ("transmission_line", 2, 10.5)]
+
+    populate.insert_rows(
+        marker,
+        "measurement",
+        ["asset_type", "asset_id", "power_flow_mw"],
+        rows,
+        ["asset_type", "asset_id"],
+    )
+
+    assert captured["cursor"] is marker
+    assert captured["rows"] == rows
+    assert "INSERT INTO measurement" in captured["sql"]
+    assert "VALUES %s" in captured["sql"]
+    assert "ON CONFLICT (asset_type, asset_id) DO NOTHING" in captured["sql"]
+    assert "SELECT" not in captured["sql"]
+
+
+def test_capacity_trigger_schema_qualifies_its_lookup() -> None:
+    ddl = (Path(populate.__file__).parent / "oltp.sql").read_text(encoding="utf-8")
+    assert "FROM oltp.plant" in ddl

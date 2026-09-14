@@ -61,7 +61,7 @@ def test_missing_schema_or_table_is_audited_as_failed(
         audit = connection.execute(
             text(
                 "SELECT status, rows_processed, error_message "
-                "FROM etl.etl_control ORDER BY etl_control_id DESC LIMIT 1"
+                "FROM etl.etl_control ORDER BY execution_id DESC LIMIT 1"
             )
         ).one()
     assert audit.status == "FAILED"
@@ -124,6 +124,6 @@ def test_mid_transaction_failure_rolls_back_and_clean_rerun_succeeds(
             text(
                 "SELECT status FROM etl.etl_control "
                 "WHERE pipeline = 'data_vault.controlled_failure' "
-                "ORDER BY etl_control_id DESC LIMIT 1"
+                "ORDER BY execution_id DESC LIMIT 1"
             )
         ).scalar_one() == "SUCCESS"

@@ -244,7 +244,7 @@ DECLARE
     installed DECIMAL(10,2);
 BEGIN
     SELECT installed_capacity INTO installed
-    FROM plant
+    FROM oltp.plant
     WHERE plant_id = NEW.plant_id;
 
     IF installed IS NULL THEN
