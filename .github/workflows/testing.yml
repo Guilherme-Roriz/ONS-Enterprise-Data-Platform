@@ -141,10 +141,17 @@ jobs:
         shell: bash
         run: |
           echo "ORCHESTRATION_SNAPSHOT_PATH=$RUNNER_TEMP/airflow-first-snapshot.json" >> "$GITHUB_ENV"
-          echo "AIRFLOW_FERNET_KEY=$(python -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" >> "$GITHUB_ENV"
-          echo "AIRFLOW_API_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "AIRFLOW_API_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          fernet_key=$(python -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')
+          api_key=$(openssl rand -hex 32)
+          jwt_key=$(openssl rand -hex 32)
+          for value in "$fernet_key" "$api_key" "$jwt_key"; do
+            echo "::add-mask::$value"
+          done
+          echo "AIRFLOW_FERNET_KEY=$fernet_key" >> "$GITHUB_ENV"
+          echo "AIRFLOW_API_SECRET_KEY=$api_key" >> "$GITHUB_ENV"
+          echo "AIRFLOW_API_JWT_SECRET=$jwt_key" >> "$GITHUB_ENV"
           echo "DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
+          bash -n tests/e2e/run_airflow_dag.sh
 
       - name: Build ETL and Airflow images
         run: docker compose -p "$COMPOSE_PROJECT_NAME" -f compose.yaml --profile manual build seed-oltp airflow-init
@@ -162,8 +169,8 @@ jobs:
           python -m pytest tests/e2e/test_airflow_orchestration_result.py
           --run-orchestration --tb=short -q
 
-      - name: Trigger first scheduled pipeline run
-        run: bash tests/e2e/run_airflow_dag.sh "ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_first"
+      - name: Validate automatic daily scheduler run
+        run: bash tests/e2e/run_airflow_dag.sh scheduled
 
       - name: Validate first orchestrated result
         env:
@@ -174,7 +181,7 @@ jobs:
           tests/data_quality/test_pipeline_quality.py
           --run-orchestration --tb=short -q
 
-      - name: Trigger idempotent scheduled rerun
+      - name: Trigger idempotent manual rerun through scheduler
         run: bash tests/e2e/run_airflow_dag.sh "ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_second"
 
       - name: Validate idempotent orchestrated rerun
