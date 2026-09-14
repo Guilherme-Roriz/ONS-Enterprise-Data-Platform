@@ -369,13 +369,18 @@ container. The database tests executed the seed, OLTP-to-Vault and
 Vault-to-Galaxy entry points, cross-layer assertions, failure/rollback paths,
 SCD2 change behavior and a complete idempotent rerun.
 
-This evidence validates the application pipeline entry points, not the complete
-Airflow runtime. A separate `airflow` job has now been added to the workflow to
-build the images, start the scheduler and DAG processor, trigger the DAG and
-validate both DockerOperator task states and the idempotent rerun. That job is
-pending its first real execution; its implementation and continuation steps
-are documented in [Testing and Data Quality](testing.md). Do not treat the
-Airflow runtime as proven until that job finishes successfully.
+The complete runtime was subsequently validated in GitHub Actions run
+[#9](https://github.com/Guilherme-Roriz/ONS-Enterprise-Data-Platform/actions/runs/34882377677)
+against commit `90c073e`: 37 unit tests, 13 direct PostgreSQL tests and the
+separate `airflow` job passed. Both images were built, the metadata migration
+and health checks succeeded, and DAG import had no errors. Unpausing created
+the due daily run, followed by a manual CLI rerun handled by the scheduler.
+All six DockerOperator task instances succeeded in dependency order; Data
+Quality and snapshot equality passed after both runs. Teardown succeeded.
+
+This scenario covers successful scheduling and rerun, not forced task failure,
+Airflow retry exhaustion or scheduler restart recovery. See
+[Testing and Data Quality](testing.md) for exact evidence and limits.
 
 ## Review order
 

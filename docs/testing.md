@@ -22,10 +22,33 @@ point twice to prove consistency after a rerun.
 - [x] Failure paths / rollback
 - [x] Cross-layer validation
 - [x] E2E
-- [ ] Airflow scheduler / DockerOperator E2E
+- [x] Airflow scheduler / DockerOperator E2E
 - [x] Final documentation
 
 ## Verified status
+
+The complete workflow passed in GitHub Actions run
+[#9](https://github.com/Guilherme-Roriz/ONS-Enterprise-Data-Platform/actions/runs/34882377677)
+on 2026-09-14, testing commit `90c073e`:
+
+- 37 unit tests passed;
+- 13 direct PostgreSQL tests passed (the orchestration test is deliberately
+  skipped in that job);
+- the Airflow job built both images and started the complete stack;
+- the empty-state check passed, then both the automatic daily run and manual
+  rerun passed their task-state, execution-order and Data Quality assertions;
+- all six task instances were `DockerOperator`, `success`, attempt 1;
+- the first and second snapshots matched, with 27 and 54 successful ETL audit
+  steps respectively;
+- the environment teardown completed successfully.
+
+The orchestration job reported `1 passed` for the empty database, `2 passed`
+after the daily run and `2 passed` after the manual rerun. These are repeated
+checks of two test functions, not five distinct test cases. The validated run
+IDs were `scheduled__2026-09-14T09:00:00+00:00` and
+`ci_34882377677_1_second`.
+
+### Earlier direct-entrypoint baseline
 
 GitHub Actions run
 [#5](https://github.com/Guilherme-Roriz/ONS-Enterprise-Data-Platform/actions/runs/34850604366)
@@ -72,9 +95,11 @@ tests/
 | `integration` | Real constraints, roles, transactions, seed, ETL and SCD2 behavior | Yes |
 | `data_quality` | Data Vault, Galaxy and cross-layer assertions | Yes |
 | `e2e` | Empty environment through complete pipeline and rerun | Yes |
+| `orchestration` | Real scheduler, DockerOperator task states and resulting data | Yes, plus Airflow and Docker |
 | `failure_path` | Expected connection, schema, table and transaction failures | Yes |
 
-Database-dependent tests are skipped unless `--run-integration` or `--run-e2e`
+Database-dependent tests are skipped unless `--run-integration`, `--run-e2e`
+or `--run-orchestration`
 is explicitly supplied. This prevents an accidental connection to a developer
 database during an ordinary local run.
 
@@ -129,11 +154,14 @@ manual dispatches.
 
 ## Airflow scheduler and DockerOperator E2E
 
-The orchestration E2E is now prepared as a separate `airflow` job in the same
+The orchestration E2E runs as a separate `airflow` job in the same
 workflow. It intentionally uses the production `compose.yaml` with an
 isolated Compose project (`ons-airflow-e2e`), database name
 `ons_edp_airflow_test`, host port `55433`, test-only credentials and fresh
-volumes. The development stack is not reused.
+volumes. The GitHub job runs on a fresh hosted Linux runner. The production
+network name `ons-network` and image tags are retained, so this job must use
+a dedicated Docker host; a different Compose project name alone does not
+isolate the hard-coded network and images from a running development stack.
 
 The job performs this sequence:
 
@@ -142,11 +170,11 @@ build ETL and Airflow images
 → start postgres, airflow-db, airflow-init, API server, scheduler and DAG processor
 → confirm the application database is empty
 → wait for DAG discovery and assert zero import errors
-→ unpause and trigger ons_enterprise_data_pipeline through the Airflow CLI
+→ unpause ons_enterprise_data_pipeline and wait for its automatic daily run
 → poll Airflow metadata until the scheduler reports success
-→ assert seed_oltp, load_data_vault and publish_galaxy are all successful
+→ assert all three tasks are successful DockerOperators, in dependency order
 → run Data Quality assertions and save a pipeline snapshot
-→ trigger a second DAG run
+→ trigger a second DAG run manually through the Airflow CLI
 → repeat Data Quality assertions and compare the snapshot for idempotency
 → collect diagnostics and remove all Compose volumes
 ```
@@ -157,12 +185,26 @@ marker plus `--run-orchestration` flag keep this slower test separate from the
 direct-entrypoint E2E. The test also validates empty state, Airflow import
 errors, `dag_run` state, all three `task_instance` states, row counts, audit
 successes, cross-layer totals and equality between the first and second run.
+The Data Quality fixture does not reset or reload the database in orchestration
+mode: it inspects only data produced by Airflow. The audit contract expects
+27 successful ETL steps after the daily run and 54 after the manual rerun.
+Snapshot equality covers all mutable application-table row counts and selected
+business totals, not byte-for-byte equality of every row.
 
-This job has been implemented but **has not yet been executed**. The next
-session must push the pending branch changes, monitor the new GitHub Actions
-job, and fix any Airflow 3.3.1/runner-specific issue revealed by the real
-Docker run before checking this item off. Do not describe the orchestration
-E2E as passed until that workflow job finishes successfully.
+The first real execution exposed two test-harness issues: the workflow used
+the unavailable `runner` context at job-level environment scope, and unpausing
+the DAG created its due daily run before the script's manual trigger. The
+snapshot path is now configured inside a step; the test explicitly validates
+the automatic run before submitting the manual rerun. It keeps the production
+DAG, cron expression and Docker commands intact.
+
+This job was executed successfully in run #9 linked above. To repeat it, push
+to `feature/testing`, or use **Actions → Testing and Data Quality → Run
+workflow** and select that branch when manual dispatch is available. The
+workflow contains the full test-only environment and ordered commands. An
+ordinary local `pytest` invocation never starts Airflow; passing
+`--run-orchestration` only enables assertions against an already loaded
+orchestration test database.
 
 ## Critical contracts
 
@@ -206,10 +248,13 @@ auditable, and a corrected rerun succeeds cleanly.
 
 ## Limitations
 
-- The direct-entrypoint E2E is verified. The new scheduler/DockerOperator E2E
-  is implemented in CI but remains pending its first real execution.
-- Airflow/DockerOperator topology is protected by unit-level architectural
-  contracts; a full Airflow runtime test remains separate operational work.
+- The Airflow E2E validates the due daily run after unpausing and a manual
+  rerun on one Linux runner. It does not wait for a future 06:00 clock boundary
+  or validate scheduler recovery after a restart.
+- ETL fault injection, rollback and corrected rerun are validated directly
+  as listed in Failure paths above. Forced
+  DockerOperator failure, Airflow retry exhaustion and recovery are not part
+  of this orchestration scenario; the successful task instances used attempt 1.
 - The suite does not currently include performance, concurrency, lock-contention
   or large-volume tests.
 - Mutation-based SCD2 history is exercised for the power-plant dimension. The

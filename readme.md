@@ -133,10 +133,13 @@ python -m pytest -m unit -q
 ```
 
 The isolated PostgreSQL 17 suite runs automatically in GitHub Actions without
-reusing the development database. The verified run passed 36 unit tests and 13
+reusing the development database. The verified run passed 37 unit tests and 13
 PostgreSQL Integration/Data Quality/E2E tests, including a complete idempotent
-rerun. A separate Airflow scheduler/DockerOperator E2E job is now defined and
-awaits its first real CI execution. See [Testing and Data Quality](docs/testing.md)
+rerun. The Airflow scheduler/DockerOperator E2E also passed: an automatic daily
+run and a manual rerun completed with all tasks successful, correct dependency
+order, Data Quality assertions and matching snapshots. Evidence is available in
+[GitHub Actions #9](https://github.com/Guilherme-Roriz/ONS-Enterprise-Data-Platform/actions/runs/34882377677).
+See [Testing and Data Quality](docs/testing.md)
 for the environment, markers, fixtures, commands, failure paths, evidence and
 explicit limitations.
 
