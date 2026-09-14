@@ -72,6 +72,7 @@ No Redis or Celery components are used by the local stack.
 
 - [Airflow architecture and operations](docs/airflow.md)
 - [Docker and local infrastructure](docs/docker.md)
+- [Testing and Data Quality](docs/testing.md)
 - [OLTP model](docs/oltp.md)
 - [Data Vault model](docs/data_vault.md)
 - [Kimball/Galaxy model](docs/kimball.md)
@@ -123,17 +124,19 @@ docker compose --profile manual up --build \
 
 ## Repository tests
 
-The static suite checks the ETL contracts and the Airflow/DockerOperator
-architecture without requiring a running Airflow installation:
+The pytest suite separates fast unit contracts from real PostgreSQL integration,
+Data Quality and E2E validation:
 
 ```bash
-python -m unittest discover -s tests -v
+python -m pip install -r requirements-test.txt
+python -m pytest -m unit -q
 ```
 
-This revision passed the static suite, but Docker is not installed on the host
-where it was prepared. Image builds, service health checks, DAG import checks,
-and the complete Airflow run are still pending on a Docker-enabled machine; see
-the exact [validation status](docs/airflow.md#validation-status-of-this-revision).
+The isolated PostgreSQL 17 suite runs automatically in GitHub Actions without
+reusing the development database. The verified run passed 36 unit tests and 13
+PostgreSQL Integration/Data Quality/E2E tests, including a complete idempotent
+rerun. See [Testing and Data Quality](docs/testing.md) for the environment,
+markers, fixtures, commands, failure paths, evidence and explicit limitations.
 
 ## Project status
 

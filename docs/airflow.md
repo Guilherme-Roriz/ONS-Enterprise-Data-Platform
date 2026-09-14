@@ -362,23 +362,18 @@ every flag.
 
 ## Validation status of this revision
 
-The Python DAG and test modules compile, the Compose YAML parses, all 27
-repository tests pass, and Git's whitespace check is clean.
+The repository pytest workflow is active. GitHub Actions run
+[#5](https://github.com/Guilherme-Roriz/ONS-Enterprise-Data-Platform/actions/runs/34850604366)
+passed 36 unit contracts and 13 tests against an isolated PostgreSQL 17
+container. The database tests executed the seed, OLTP-to-Vault and
+Vault-to-Galaxy entry points, cross-layer assertions, failure/rollback paths,
+SCD2 change behavior and a complete idempotent rerun.
 
-Docker is not installed in the environment where this revision was prepared:
-the `docker` command is not available. Therefore the following checks have not
-been executed here:
-
-- `docker compose config --quiet`;
-- both image builds;
-- `airflow-init`;
-- service health checks;
-- `airflow dags list-import-errors` inside the running stack;
-- a manual DAG trigger and the complete OLTP -> Data Vault -> Galaxy run.
-
-This revision has static validation, not an end-to-end Docker validation. Run
-the commands in this guide on a Docker-enabled host before treating the local
-stack as E2E-verified.
+This evidence validates the application pipeline entry points, not the complete
+Airflow runtime. Application/Airflow image builds, scheduler DAG import and an
+Airflow-triggered DockerOperator run were not performed by this test workflow
+and must not be treated as proven. See [Testing and Data Quality](testing.md) for
+the precise scope and commands.
 
 ## Review order
 
@@ -389,7 +384,7 @@ For an educational file-by-file review:
 3. `Dockerfile.airflow` and `airflow/requirements.txt` — orchestration image;
 4. `airflow/dags/ons_enterprise_pipeline.py` — task contract and lineage;
 5. `compose.yaml` — infrastructure, secret scope, socket, and network;
-6. `tests/test_airflow_orchestration.py` — architectural regression checks.
+6. `tests/unit/test_airflow_contract.py` — architectural regression checks.
 
 Official references:
 
