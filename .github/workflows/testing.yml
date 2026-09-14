@@ -123,7 +123,6 @@ jobs:
       TEST_DB_PASSWORD: airflow_test_etl_password
       TEST_OLTP_USER: oltp_airflow_test
       TEST_OLTP_PASSWORD: airflow_test_oltp_password
-      ORCHESTRATION_SNAPSHOT_PATH: ${{ runner.temp }}/airflow-first-snapshot.json
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -141,6 +140,7 @@ jobs:
       - name: Configure isolated Airflow secrets and Docker access
         shell: bash
         run: |
+          echo "ORCHESTRATION_SNAPSHOT_PATH=$RUNNER_TEMP/airflow-first-snapshot.json" >> "$GITHUB_ENV"
           echo "AIRFLOW_FERNET_KEY=$(python -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" >> "$GITHUB_ENV"
           echo "AIRFLOW_API_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "AIRFLOW_API_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
