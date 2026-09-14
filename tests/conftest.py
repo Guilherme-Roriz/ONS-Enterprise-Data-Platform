@@ -144,6 +144,9 @@ def reset_database(
                 SELECT format('%I.%I', schemaname, tablename)
                 FROM pg_tables
                 WHERE schemaname IN ('oltp', 'data_vault', 'galaxy', 'etl')
+                  AND NOT (
+                      schemaname = 'galaxy' AND tablename = 'dim_junk_flags'
+                  )
                 ORDER BY schemaname, tablename
                 """
             )
@@ -229,4 +232,3 @@ def loaded_pipeline(
         assert result.returncode == 0, (
             f"{name} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-
